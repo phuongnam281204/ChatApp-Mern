@@ -1,4 +1,5 @@
 /* Temporarily commented out for CDN testing */
-/* @tailwind base;
+@tailwind base;
 @tailwind components;
-@tailwind utilities; */
+@tailwind utilities;
+@plugin "daisyui";
