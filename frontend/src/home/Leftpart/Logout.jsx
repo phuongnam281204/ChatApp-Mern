@@ -1,18 +1,17 @@
-import React from 'react'
+import React from "react";
+import { BiLogOutCircle } from "react-icons/bi";
 
-const Logout = () => {
+const Logout = ({ onClick }) => {
   return (
-    <>
-      <hr />
-      <div className=" h-[10vh] bg-transparent">
-        <div>
-          <BiLogOutCircle
-            className="text-5xl text-white hover:bg-slate-700 duration-300 cursor-pointer rounded-full p-2 ml-2 mt-1"
-          />
-        </div>
-      </div>
-    </>
-  )
-}
+    <button
+      type="button"
+      onClick={onClick}
+      className="rail-btn hover:bg-[var(--app-bg)]"
+      title="Logout"
+    >
+      <BiLogOutCircle className="text-2xl" />
+    </button>
+  );
+};
 
-export default Logout
+export default Logout;

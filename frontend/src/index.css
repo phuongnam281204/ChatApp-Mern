@@ -3,3 +3,157 @@
 @tailwind components;
 @tailwind utilities;
 @plugin "daisyui";
+
+@layer base {
+  :root {
+    --app-bg: #eff6ff;
+    --header: #1d4ed8;
+    --bubble-me: #2563eb;
+    --bubble-other: #ffffff;
+    --border: #e2e8f0;
+    --text-me: #ffffff;
+    --text-other: #1f2937;
+    --text-muted: #9ca3af;
+    --input-bg: #dbeafe;
+  }
+
+  body {
+    background-color: var(--app-bg);
+    color: var(--text-other);
+  }
+}
+
+@layer components {
+  .chat-shell {
+    background-color: var(--app-bg);
+  }
+
+  .sidebar {
+    background-color: #ffffff;
+    border-right: 1px solid var(--border);
+  }
+
+  .rail {
+    width: 64px;
+    background-color: #ffffff;
+    border-right: 1px solid var(--border);
+  }
+
+  .rail-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    color: var(--text-other);
+  }
+
+  .rail-btn-active {
+    background-color: var(--input-bg);
+    color: var(--header);
+  }
+
+  .panel {
+    background-color: #ffffff;
+  }
+
+  .panel-header {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    background-color: #ffffff;
+  }
+
+  .avatar-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 9999px;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    background-color: var(--input-bg);
+    color: var(--header);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 9999px;
+    background-color: #22c55e;
+    border: 2px solid #ffffff;
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+  }
+
+  .list-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+  }
+
+  .list-item-active {
+    background-color: var(--input-bg);
+  }
+
+  .header-bar {
+    background-color: var(--header);
+    color: #ffffff;
+  }
+
+  .muted {
+    color: var(--text-muted);
+  }
+
+  .input-soft {
+    background-color: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text-other);
+  }
+
+  .btn-primary {
+    background-color: var(--header);
+    color: #ffffff;
+  }
+
+  .bubble-me {
+    background-color: var(--bubble-me);
+    color: var(--text-me);
+  }
+
+  .bubble-other {
+    background-color: var(--bubble-other);
+    border: 1px solid var(--border);
+    color: var(--text-other);
+  }
+
+  .toast {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 320px;
+    max-width: calc(100vw - 24px);
+    padding: 12px 12px;
+    border-radius: 12px;
+    background-color: var(--bubble-other);
+    border: 1px solid var(--border);
+    z-index: 50;
+  }
+
+  .toast-title {
+    font-weight: 700;
+    color: var(--text-other);
+    margin-bottom: 4px;
+  }
+
+  .toast-body {
+    font-size: 13px;
+    color: var(--text-other);
+  }
+}
