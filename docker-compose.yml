@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      PORT: 5000
+      NODE_ENV: production
+      MONGODB_URI: ${MONGODB_URI}
+      JWT_SECRET: ${JWT_SECRET}
+      # When serving everything on the same domain via Nginx, this should be that domain origin.
+      # Example: https://chat.yourdomain.com
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN}
+    expose:
+      - "5000"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: deploy/nginx/Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
