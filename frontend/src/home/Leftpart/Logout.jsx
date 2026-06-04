@@ -6,7 +6,7 @@ const Logout = ({ onClick }) => {
     <button
       type="button"
       onClick={onClick}
-      className="rail-btn hover:bg-[var(--app-bg)]"
+      className="rail-btn hover:bg-[var(--input-bg)]"
       title="Logout"
     >
       <BiLogOutCircle className="text-2xl" />

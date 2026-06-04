@@ -16,8 +16,11 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
-    passwordHash: { type: String, required: true, select: false },
+    passwordHash: { type: String, select: false },
+    googleId: { type: String, unique: true, sparse: true },
     avatarUrl: { type: String },
+    passwordResetTokenHash: { type: String, select: false },
+    passwordResetExpiresAt: { type: Date, select: false },
   },
   { timestamps: true },
 );

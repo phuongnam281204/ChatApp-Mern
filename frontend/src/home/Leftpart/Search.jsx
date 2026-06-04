@@ -85,7 +85,7 @@ const Search = ({ onCreatedConversation, setError }) => {
     <div className="px-4 py-3">
       <form onSubmit={handleSubmit}>
         <div className="flex gap-2">
-          <label className="input-soft rounded-xl px-3 py-2 flex items-center gap-2 flex-1">
+          <label className="input-soft rounded-2xl px-3 py-2 flex items-center gap-2 flex-1">
             <FaSearch className="text-base muted" />
             <input
               type="text"
@@ -95,20 +95,14 @@ const Search = ({ onCreatedConversation, setError }) => {
               onChange={(e) => setQ(e.target.value)}
             />
           </label>
-          <button type="submit" className="btn-primary rounded-xl px-4">
+          <button type="submit" className="btn-primary rounded-2xl px-4">
             Tìm
           </button>
         </div>
       </form>
 
       {selected.size ? (
-        <div
-          className="mt-3 p-3 rounded-lg"
-          style={{
-            backgroundColor: "#ffffff",
-            border: "1px solid var(--border)",
-          }}
-        >
+        <div className="mt-3 p-3 rounded-2xl glass-card">
           <div
             className="text-sm font-semibold"
             style={{ color: "var(--text-other)" }}
@@ -117,14 +111,14 @@ const Search = ({ onCreatedConversation, setError }) => {
           </div>
           <div className="mt-2 flex gap-2">
             <input
-              className="flex-1 input-soft rounded-lg px-3 py-2 outline-none"
+              className="flex-1 input-soft rounded-2xl px-3 py-2 outline-none"
               placeholder="Tên nhóm"
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
             />
             <button
               type="button"
-              className="btn-primary rounded-lg px-4 disabled:opacity-50"
+              className="btn-primary rounded-2xl px-4 disabled:opacity-50"
               onClick={createGroup}
               disabled={groupName.trim().length === 0 || selected.size < 2}
             >
@@ -138,12 +132,12 @@ const Search = ({ onCreatedConversation, setError }) => {
       ) : null}
 
       {results.length ? (
-        <div
-          className="mt-3 border rounded-lg overflow-hidden"
-          style={{ borderColor: "var(--border)" }}
-        >
+        <div className="mt-3 border rounded-2xl overflow-hidden glass-card">
           {results.map((u) => (
-            <div key={u.id} className="w-full px-3 py-2 hover:bg-blue-50">
+            <div
+              key={u.id}
+              className="w-full px-3 py-2 hover:bg-[var(--input-bg)]"
+            >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div
@@ -158,7 +152,7 @@ const Search = ({ onCreatedConversation, setError }) => {
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    className="rail-btn hover:bg-[var(--app-bg)]"
+                    className="rail-btn hover:bg-[var(--input-bg)]"
                     title="Chat 1-1"
                     onClick={() => startDirect(u.id)}
                   >
@@ -166,7 +160,7 @@ const Search = ({ onCreatedConversation, setError }) => {
                   </button>
                   <button
                     type="button"
-                    className={`rail-btn hover:bg-[var(--app-bg)] ${
+                    className={`rail-btn hover:bg-[var(--input-bg)] ${
                       selected.has(String(u.id)) ? "rail-btn-active" : ""
                     }`}
                     title="Thêm vào nhóm"

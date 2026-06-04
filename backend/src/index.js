@@ -41,5 +41,13 @@ app.locals.io = io;
 
 httpServer.listen(PORT, async () => {
   console.log("server is running on PORT:" + PORT);
-  await connectDB();
+  try {
+    await connectDB();
+  } catch (err) {
+    console.error(
+      "Failed to connect MongoDB. Check MONGODB_URI and MongoDB is running.",
+    );
+    process.exitCode = 1;
+    httpServer.close(() => process.exit(1));
+  }
 });

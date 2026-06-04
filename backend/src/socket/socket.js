@@ -57,6 +57,10 @@ export function createSocketServer(httpServer) {
 
   io.on("connection", async (socket) => {
     const userId = socket.user.id;
+    const senderProfile = await User.findById(userId)
+      .select("username email avatarUrl")
+      .lean()
+      .catch(() => null);
 
     socket.join(userRoom(userId));
 
@@ -115,45 +119,52 @@ export function createSocketServer(httpServer) {
         if (!conversationId) return;
         const normalizedText = String(text || "").trim();
         if (!normalizedText) return;
+        const normalizedClientMessageId = clientMessageId
+          ? String(clientMessageId)
+          : undefined;
 
         const convo = await Conversation.findById(conversationId);
         if (!convo) return;
         if (!convo.members.map(String).includes(String(userId))) return;
 
-        const message = await Message.create({
-          conversationId,
-          senderId: userId,
-          type: "text",
-          text: normalizedText,
-          clientMessageId: clientMessageId
-            ? String(clientMessageId)
-            : undefined,
-        });
+        let message;
+        try {
+          message = await Message.create({
+            conversationId,
+            senderId: userId,
+            type: "text",
+            text: normalizedText,
+            clientMessageId: normalizedClientMessageId,
+          });
+        } catch (err) {
+          if (err?.code === 11000) return;
+          throw err;
+        }
 
-        convo.lastMessageAt = message.createdAt;
-        convo.lastMessagePreview = normalizedText.slice(0, 200);
-        await convo.save();
-
-        const sender = await User.findById(userId).select(
-          "username email avatarUrl",
-        );
-
-        io.to(conversationRoom(conversationId)).emit("message:new", {
+        const outgoing = {
           message: {
             id: message._id,
             conversationId,
             sender: {
-              id: sender?._id || userId,
-              username: sender?.username,
-              email: sender?.email,
-              avatarUrl: sender?.avatarUrl,
+              id: senderProfile?._id || userId,
+              username: senderProfile?.username,
+              email: senderProfile?.email,
+              avatarUrl: senderProfile?.avatarUrl,
             },
             type: message.type,
             text: message.text,
             clientMessageId: message.clientMessageId,
             createdAt: message.createdAt,
           },
-        });
+        };
+
+        for (const memberId of convo.members.map(String)) {
+          io.to(userRoom(memberId)).emit("message:new", outgoing);
+        }
+
+        convo.lastMessageAt = message.createdAt;
+        convo.lastMessagePreview = normalizedText.slice(0, 200);
+        convo.save().catch(() => {});
       },
     );
 

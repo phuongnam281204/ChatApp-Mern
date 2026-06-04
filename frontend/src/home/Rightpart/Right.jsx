@@ -6,6 +6,8 @@ import {
   FiSearch,
   FiSmile,
   FiPaperclip,
+  FiArrowLeft,
+  FiChevronDown,
 } from "react-icons/fi";
 
 function getConversationTitle(conversation, me) {
@@ -30,33 +32,72 @@ const Right = ({
   me,
   conversation,
   messages = [],
+  onSendMessage,
   setError,
   onlineUserIds,
+  onBack,
 }) => {
   const [text, setText] = React.useState("");
   const [typingUserIds, setTypingUserIds] = React.useState(() => new Set());
   const [seenByOtherAt, setSeenByOtherAt] = React.useState(null);
   const typingTimeoutRef = React.useRef(null);
   const bottomRef = React.useRef(null);
+  const inputRef = React.useRef(null);
+  const messageListRef = React.useRef(null);
+  const wasNearBottomRef = React.useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = React.useState(false);
+
+  const isNearBottom = React.useCallback(() => {
+    const el = messageListRef.current;
+    if (!el) return true;
+    const distance = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    return distance <= 80;
+  }, []);
+
+  const jumpToLatest = React.useCallback((behavior = "auto") => {
+    const el = messageListRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    wasNearBottomRef.current = true;
+    setShowJumpToLatest(false);
+  }, []);
+
+  const handleMessageScroll = React.useCallback(() => {
+    const nearBottom = isNearBottom();
+    wasNearBottomRef.current = nearBottom;
+    setShowJumpToLatest(!nearBottom);
+  }, [isNearBottom]);
 
   React.useEffect(() => {
     setText("");
     setTypingUserIds(new Set());
-    if (conversation?.type === "direct") {
-      const other = (conversation.members || []).find(
-        (m) => String(m.id) !== String(me?.id),
-      );
-      const raw = other?.id
-        ? conversation.lastReadAtByUser?.[String(other.id)]
-        : null;
-      setSeenByOtherAt(raw ? new Date(raw) : null);
-    } else {
-      setSeenByOtherAt(null);
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
     }
+    requestAnimationFrame(() => jumpToLatest("auto"));
+  }, [conversation?.id, jumpToLatest]);
+
+  React.useEffect(() => {
+    if (!conversation) {
+      setSeenByOtherAt(null);
+      return;
+    }
+
+    if (conversation.type !== "direct") {
+      setSeenByOtherAt(null);
+      return;
+    }
+
+    const other = (conversation.members || []).find(
+      (m) => String(m.id) !== String(me?.id),
+    );
+    const raw = other?.id
+      ? conversation.lastReadAtByUser?.[String(other.id)]
+      : null;
+    setSeenByOtherAt(raw ? new Date(raw) : null);
   }, [
     conversation?.id,
     conversation?.type,
-    conversation?.members,
     conversation?.lastReadAtByUser,
     me?.id,
   ]);
@@ -105,8 +146,12 @@ const Right = ({
   }, [conversation, messages, me?.id]);
 
   React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversation?.id, messages.length]);
+    if (wasNearBottomRef.current) {
+      jumpToLatest("auto");
+    } else {
+      setShowJumpToLatest(true);
+    }
+  }, [conversation?.id, messages.length, jumpToLatest]);
 
   const sendTyping = React.useCallback(
     (isTyping) => {
@@ -127,6 +172,22 @@ const Right = ({
     typingTimeoutRef.current = setTimeout(() => sendTyping(false), 800);
   };
 
+  const handleInputHeight = (e) => {
+    const el = e?.target || inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!conversation) return;
@@ -135,12 +196,24 @@ const Right = ({
     if (!trimmed) return;
 
     try {
-      socket.emit("message:send", {
-        conversationId: conversation.id,
-        text: trimmed,
-        clientMessageId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      });
+      const sent = onSendMessage
+        ? onSendMessage({ conversationId: conversation.id, text: trimmed })
+        : (() => {
+            socket.emit("message:send", {
+              conversationId: conversation.id,
+              text: trimmed,
+              clientMessageId: `${Date.now()}-${Math.random()
+                .toString(16)
+                .slice(2)}`,
+            });
+            return true;
+          })();
+
+      if (!sent) return;
       setText("");
+      if (inputRef.current) {
+        inputRef.current.style.height = "auto";
+      }
       sendTyping(false);
     } catch (err) {
       setError?.(err.message);
@@ -179,9 +252,19 @@ const Right = ({
   }, [conversation, me?.id, onlineUserIds, typingNames]);
 
   return (
-    <div className="flex-1 h-full flex flex-col">
-      <div className="panel-header" style={{ backgroundColor: "#ffffff" }}>
+    <div className="relative flex-1 min-h-0 h-full flex flex-col overflow-hidden">
+      <div className="panel-header">
         <div className="flex items-center gap-3 min-w-0">
+          {onBack ? (
+            <button
+              type="button"
+              className="rail-btn hover:bg-[var(--input-bg)]"
+              onClick={onBack}
+              title="Back"
+            >
+              <FiArrowLeft className="text-lg" />
+            </button>
+          ) : null}
           <div className="avatar-circle" aria-hidden>
             {conversation ? avatarText : "?"}
           </div>
@@ -198,21 +281,21 @@ const Right = ({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            className="rail-btn hover:bg-[var(--app-bg)]"
+            className="rail-btn hover:bg-[var(--input-bg)]"
             title="Call"
           >
             <FiPhone className="text-lg" />
           </button>
           <button
             type="button"
-            className="rail-btn hover:bg-[var(--app-bg)]"
+            className="rail-btn hover:bg-[var(--input-bg)]"
             title="Video"
           >
             <FiVideo className="text-lg" />
           </button>
           <button
             type="button"
-            className="rail-btn hover:bg-[var(--app-bg)]"
+            className="rail-btn hover:bg-[var(--input-bg)]"
             title="Search"
           >
             <FiSearch className="text-lg" />
@@ -220,7 +303,11 @@ const Right = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 chat-shell">
+      <div
+        ref={messageListRef}
+        onScroll={handleMessageScroll}
+        className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-5 py-5 space-y-3 chat-shell"
+      >
         {conversation ? (
           messages.map((m) => {
             const mine = String(m.sender?.id) === String(me?.id);
@@ -240,7 +327,7 @@ const Right = ({
                 className={`flex ${mine ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[62%] rounded-2xl px-3 py-2 text-sm ${
+                  className={`max-w-[78%] rounded-2xl px-3.5 py-2.5 text-sm ${
                     mine ? "bubble-me" : "bubble-other"
                   }`}
                 >
@@ -252,7 +339,9 @@ const Right = ({
                       {senderLabel}
                     </div>
                   ) : null}
-                  <div>{m.text}</div>
+                  <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+                    {m.text}
+                  </div>
                   <div className="text-[10px] mt-1 muted">
                     {m.createdAt
                       ? new Date(m.createdAt).toLocaleTimeString()
@@ -273,39 +362,63 @@ const Right = ({
         <div ref={bottomRef} />
       </div>
 
+      {conversation && showJumpToLatest ? (
+        <button
+          type="button"
+          onClick={() => jumpToLatest("auto")}
+          className="absolute right-4 bottom-[88px] h-10 w-10 rounded-full grid place-items-center border"
+          style={{
+            backgroundColor: "var(--surface)",
+            borderColor: "var(--app-border)",
+            color: "var(--accent)",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.22)",
+          }}
+          title="Tin nhắn mới nhất"
+          aria-label="Tin nhắn mới nhất"
+        >
+          <FiChevronDown className="text-lg" />
+        </button>
+      ) : null}
+
       <form
         onSubmit={handleSubmit}
-        className="p-3 flex items-center gap-2"
-        style={{
-          borderTop: "1px solid var(--border)",
-          backgroundColor: "var(--app-bg)",
-        }}
+        className="p-3 flex items-center gap-2 panel"
+        style={{ borderTop: "1px solid var(--app-border)" }}
       >
-        <button type="button" className="rail-btn hover:bg-white" title="Emoji">
+        <button
+          type="button"
+          className="rail-btn hover:bg-[var(--input-bg)]"
+          title="Emoji"
+        >
           <FiSmile className="text-lg" />
         </button>
         <button
           type="button"
-          className="rail-btn hover:bg-white"
+          className="rail-btn hover:bg-[var(--input-bg)]"
           title="Attach"
         >
           <FiPaperclip className="text-lg" />
         </button>
-        <input
-          className="flex-1 input-soft rounded-lg px-3 py-2 outline-none"
+        <textarea
+          ref={inputRef}
+          className="flex-1 input-soft rounded-2xl px-3 py-2 outline-none resize-none leading-5 max-h-[132px] overflow-y-auto"
           placeholder={
             conversation ? "Type a message" : "Select a conversation"
           }
           value={text}
-          onChange={handleChange}
+          onChange={(e) => {
+            handleChange(e);
+            handleInputHeight(e);
+          }}
+          rows={1}
           disabled={!conversation}
         />
         <button
-          className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
+          className="btn-primary px-4 py-2 rounded-2xl disabled:opacity-50"
           disabled={!conversation || !text.trim()}
           type="submit"
         >
-          Send
+          Gui
         </button>
       </form>
     </div>
