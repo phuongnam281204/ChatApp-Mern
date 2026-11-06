@@ -12,6 +12,8 @@ const conversationSchema = new mongoose.Schema(
     lastMessageAt: { type: Date },
     lastMessagePreview: { type: String },
     lastReadAtByUser: { type: Map, of: Date, default: {} },
+    // Members who turned notifications off for this conversation.
+    mutedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   },
   { timestamps: true },
 );
