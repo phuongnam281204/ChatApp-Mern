@@ -10,6 +10,14 @@ services:
       # When serving everything on the same domain via Nginx, this should be that domain origin.
       # Example: https://chat.yourdomain.com
       CLIENT_ORIGIN: ${CLIENT_ORIGIN}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # Optional: attachments/avatars (Cloudinary) and password-reset email (SMTP)
+      CLOUDINARY_URL: ${CLOUDINARY_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     expose:
       - "5000"
 

@@ -18,6 +18,21 @@ CLIENT_ORIGIN=http://<your-vps-ip>
 
 If you later enable HTTPS, set `CLIENT_ORIGIN=https://<your-domain>`.
 
+Optional features (leave empty to turn them off):
+
+```
+# Images, files and avatars. Without it, uploads answer 503.
+CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@<cloud_name>
+# Password-reset email. Without it, "Quên mật khẩu" answers 503 in production.
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=<user>
+SMTP_PASS=<password>
+MAIL_FROM="Memo Chat <no-reply@your-domain>"
+```
+
+The reset email links to `CLIENT_ORIGIN/?reset=<token>`, so `CLIENT_ORIGIN` must be the public address.
+
 ### 3) Run
 
 ```
@@ -37,4 +52,8 @@ Use Nginx + Let's Encrypt on the VPS. Keep the app routing the same:
 When HTTPS is enabled:
 
 - set `CLIENT_ORIGIN` to `https://<your-domain>`
-- cookies will be `secure` automatically because `NODE_ENV=production`
+- cookies become `Secure` automatically because `CLIENT_ORIGIN` starts with `https://`
+  (on plain `http://` they are not, so login still works before HTTPS is set up)
+- voice messages need HTTPS: browsers only allow the microphone on `https://` (or `localhost`)
+
+Health check: `GET /api/health` answers `{ "ok": true }`.
