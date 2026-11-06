@@ -174,3 +174,39 @@ echo "0 3 * * * root /opt/certbot/bin/certbot renew -q --deploy-hook 'systemctl 
 ```
 cd ~/ChatApp-Mern && git pull && docker compose up -d --build
 ```
+
+## Continuous deployment (GitHub Actions)
+
+`.github/workflows/deploy.yml` runs on every pull request and every push to `main`:
+
+1. `backend`: `npm ci && npm test`
+2. `frontend`: `npm ci && npm run lint && npm run build`
+3. `deploy` (push to `main` or a manual "Run workflow" only, after 1 and 2 pass):
+   SSH into the server, `git reset --hard <tested commit>`, `docker compose up -d --build`,
+   then poll `http://127.0.0.1:8080/api/health` for up to 60 s. The job fails and prints
+   the backend logs if the app does not come back.
+
+Anything edited by hand inside `~/ChatApp-Mern` on the server, except the untracked
+`.env`, is overwritten on each deploy.
+
+### One-time setup
+
+A dedicated deploy key, created on the server (the private half goes to GitHub, then is deleted):
+
+```
+ssh-keygen -t ed25519 -f ~/.ssh/github_deploy -N "" -C "github-actions"
+cat ~/.ssh/github_deploy.pub >> ~/.ssh/authorized_keys
+cat ~/.ssh/github_deploy        # copy into the EC2_SSH_KEY secret
+rm ~/.ssh/github_deploy ~/.ssh/github_deploy.pub
+```
+
+Repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `EC2_HOST` | the Elastic IP |
+| `EC2_USER` | `ec2-user` |
+| `EC2_SSH_KEY` | the private key, including the BEGIN/END lines |
+
+Security group: GitHub-hosted runners use changing IPs, so SSH (22) must accept
+`0.0.0.0/0`. Keep password login disabled (the Amazon Linux default) so only keys work.
