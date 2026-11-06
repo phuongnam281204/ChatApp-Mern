@@ -1,54 +1,78 @@
 import React from "react";
-import Right from "./home/Rightpart/Right";
-import Settings from "./home/Settings/Settings";
 import HomeScreen from "./home/Home/HomeScreen";
 import Profile from "./home/Profile/Profile";
+import Right from "./home/Rightpart/Right";
+import Settings from "./home/Settings/Settings";
 import { apiFetch } from "./lib/api";
 import { socket } from "./lib/socket";
-import { FiHome, FiMessageSquare, FiUser, FiSettings } from "react-icons/fi";
-import { FiMail, FiLock, FiEyeOff } from "react-icons/fi";
 import {
-  FiArrowLeft,
   FiCheckCircle,
-  FiCircle,
-  FiRotateCcw,
+  FiLock,
+  FiMail,
+  FiMessageSquare,
+  FiUser,
 } from "react-icons/fi";
 
-const App = () => {
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+
+function isUnauthorized(error) {
+  return String(error?.message || "").toLowerCase().includes("unauthorized");
+}
+
+function normalizeMessage(message) {
+  if (!message) return null;
+  return {
+    ...message,
+    id: String(message.id || message._id || ""),
+    conversationId: String(message.conversationId || ""),
+  };
+}
+
+export default function App() {
   const [theme, setTheme] = React.useState(() => {
-    const saved = localStorage.getItem("theme");
-    return saved === "light" ? "light" : "dark";
+    return localStorage.getItem("theme") === "light" ? "light" : "dark";
   });
+  const [booting, setBooting] = React.useState(true);
   const [me, setMe] = React.useState(null);
-  const [conversations, setConversations] = React.useState([]);
-  const [selectedConversation, setSelectedConversation] = React.useState(null);
-  const [messages, setMessages] = React.useState([]);
-  const [onlineUserIds, setOnlineUserIds] = React.useState(() => new Set());
-  const selectedConversationIdRef = React.useRef(null);
-  const [toast, setToast] = React.useState(null);
-  const toastTimerRef = React.useRef(null);
-  const [authNeeded, setAuthNeeded] = React.useState(false);
   const [authMode, setAuthMode] = React.useState("login");
-  const [activeTab, setActiveTab] = React.useState("home");
+  const [authScreen, setAuthScreen] = React.useState("auth");
+  const [authBusy, setAuthBusy] = React.useState(false);
+  const [authNotice, setAuthNotice] = React.useState("");
+  const [rememberMe, setRememberMe] = React.useState(true);
+  const [agreeTerms, setAgreeTerms] = React.useState(false);
   const [authForm, setAuthForm] = React.useState({
     username: "",
     email: "",
     password: "",
   });
-  const [rememberMe, setRememberMe] = React.useState(false);
-  const [authScreen, setAuthScreen] = React.useState("auth");
-  const [authNotice, setAuthNotice] = React.useState("");
   const [forgotForm, setForgotForm] = React.useState({
     email: "",
     token: "",
     password: "",
     confirmPassword: "",
   });
+
+  const [conversations, setConversations] = React.useState([]);
+  const [selectedConversation, setSelectedConversation] = React.useState(null);
+  const [messages, setMessages] = React.useState([]);
+  const [onlineUserIds, setOnlineUserIds] = React.useState(() => new Set());
+  const [activeView, setActiveView] = React.useState("home");
+  const [toast, setToast] = React.useState(null);
+
   const googleButtonRef = React.useRef(null);
   const googleInitRef = React.useRef(false);
-  const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+  const selectedConversationIdRef = React.useRef(null);
+  const toastTimerRef = React.useRef(null);
 
-  const mergeIncomingMessage = React.useCallback((prev, incoming) => {
+  const showToast = React.useCallback((text, tone = "info") => {
+    if (!text) return;
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ text, tone });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3600);
+  }, []);
+
+  const mergeIncomingMessage = React.useCallback((prev, rawIncoming) => {
+    const incoming = normalizeMessage(rawIncoming);
     if (!incoming) return prev;
 
     const next = Array.isArray(prev) ? [...prev] : [];
@@ -75,7 +99,6 @@ const App = () => {
             String(m?.sender?.id || "") === incomingSenderId,
         )
       : -1;
-
     if (byClientIdIndex !== -1) {
       next[byClientIdIndex] = {
         ...next[byClientIdIndex],
@@ -93,51 +116,44 @@ const App = () => {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
-  const reportError = React.useCallback((message) => {
-    if (!message) return;
-    console.error(message);
-  }, []);
-
-  const refreshConversations = React.useCallback(async () => {
-    const data = await apiFetch("/api/conversations");
-    setConversations(data.conversations || []);
-  }, []);
-
-  const loadMessages = React.useCallback(async (conversationId) => {
-    const data = await apiFetch(
-      `/api/conversations/${conversationId}/messages?limit=50`,
-    );
-    setMessages(data.messages || []);
-  }, []);
-
   React.useEffect(() => {
     selectedConversationIdRef.current = selectedConversation?.id || null;
   }, [selectedConversation?.id]);
 
+  const refreshConversations = React.useCallback(async () => {
+    const data = await apiFetch("/api/conversations");
+    setConversations(data.conversations || []);
+    return data.conversations || [];
+  }, []);
+
+  const loadMessages = React.useCallback(async (conversationId) => {
+    if (!conversationId) return;
+    const data = await apiFetch(
+      `/api/conversations/${conversationId}/messages?limit=80`,
+    );
+    setMessages((data.messages || []).map(normalizeMessage).filter(Boolean));
+  }, []);
+
   React.useEffect(() => {
     let mounted = true;
-
     (async () => {
       try {
-        const meData = await apiFetch("/api/users/me");
+        const data = await apiFetch("/api/users/me");
         if (!mounted) return;
-        setMe(meData.user);
-        setAuthNeeded(false);
+        setMe(data.user);
         await refreshConversations();
-      } catch (e) {
+      } catch (error) {
         if (!mounted) return;
-        if (String(e.message).toLowerCase().includes("unauthorized")) {
-          setAuthNeeded(true);
-        } else {
-          reportError(e.message);
-        }
+        if (!isUnauthorized(error)) showToast(error.message, "error");
+      } finally {
+        if (mounted) setBooting(false);
       }
     })();
 
     return () => {
       mounted = false;
     };
-  }, [refreshConversations, reportError]);
+  }, [refreshConversations, showToast]);
 
   React.useEffect(() => {
     if (!me) return;
@@ -146,17 +162,20 @@ const App = () => {
 
     const onMessageNew = ({ message }) => {
       setMessages((prev) => {
-        if (!message) return prev;
         if (
-          !selectedConversationIdRef.current ||
-          String(message.conversationId) !==
+          selectedConversationIdRef.current &&
+          String(message?.conversationId) ===
             String(selectedConversationIdRef.current)
         ) {
-          return prev;
+          return mergeIncomingMessage(prev, message);
         }
-        return mergeIncomingMessage(prev, message);
+        return prev;
       });
       refreshConversations().catch(() => {});
+    };
+
+    const onPresenceState = ({ userIds }) => {
+      setOnlineUserIds(new Set((userIds || []).map((id) => String(id))));
     };
 
     const onPresenceUpdate = ({ userId, isOnline }) => {
@@ -169,66 +188,37 @@ const App = () => {
       });
     };
 
-    const onPresenceState = ({ userIds }) => {
-      if (!Array.isArray(userIds)) return;
-      setOnlineUserIds(new Set(userIds.map((id) => String(id))));
-    };
-
-    const upsertConversationToTop = (conversation) => {
-      if (!conversation?.id) return;
-      setConversations((prev) => {
-        const next = [
-          conversation,
-          ...prev.filter((c) => String(c.id) !== String(conversation.id)),
-        ];
-        return next;
-      });
-    };
-
     const onConversationAdded = ({ conversation }) => {
       if (!conversation?.id) return;
-      upsertConversationToTop(conversation);
-      setSelectedConversation(conversation);
+      setConversations((prev) => [
+        conversation,
+        ...prev.filter((c) => String(c.id) !== String(conversation.id)),
+      ]);
+      showToast(`Bạn có cuộc trò chuyện mới: ${conversation.name || "Chat"}`);
     };
 
-    const onWelcome = ({ text, conversation }) => {
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      setToast({ text: text || "Bạn có nhóm mới", conversation });
-      toastTimerRef.current = setTimeout(() => setToast(null), 3500);
+    const onWelcome = ({ text }) => {
+      showToast(text || "Bạn vừa được thêm vào một nhóm mới");
     };
 
     const onConversationSeen = ({ conversationId, userId, lastReadAt }) => {
       if (!conversationId || !userId || !lastReadAt) return;
+      const patchReadMap = (c) =>
+        String(c.id) === String(conversationId)
+          ? {
+              ...c,
+              lastReadAtByUser: {
+                ...(c.lastReadAtByUser || {}),
+                [String(userId)]:
+                  typeof lastReadAt === "string"
+                    ? lastReadAt
+                    : new Date(lastReadAt).toISOString(),
+              },
+            }
+          : c;
 
-      setConversations((prev) =>
-        prev.map((c) => {
-          if (String(c.id) !== String(conversationId)) return c;
-          return {
-            ...c,
-            lastReadAtByUser: {
-              ...(c.lastReadAtByUser || {}),
-              [String(userId)]:
-                typeof lastReadAt === "string"
-                  ? lastReadAt
-                  : new Date(lastReadAt).toISOString(),
-            },
-          };
-        }),
-      );
-
-      setSelectedConversation((prev) => {
-        if (!prev || String(prev.id) !== String(conversationId)) return prev;
-        return {
-          ...prev,
-          lastReadAtByUser: {
-            ...(prev.lastReadAtByUser || {}),
-            [String(userId)]:
-              typeof lastReadAt === "string"
-                ? lastReadAt
-                : new Date(lastReadAt).toISOString(),
-          },
-        };
-      });
+      setConversations((prev) => prev.map(patchReadMap));
+      setSelectedConversation((prev) => (prev ? patchReadMap(prev) : prev));
     };
 
     socket.on("message:new", onMessageNew);
@@ -246,13 +236,35 @@ const App = () => {
       socket.off("notification:welcome", onWelcome);
       socket.off("conversation:seen", onConversationSeen);
       socket.disconnect();
-
-      if (toastTimerRef.current) {
-        clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = null;
-      }
     };
-  }, [me, mergeIncomingMessage, refreshConversations]);
+  }, [me, mergeIncomingMessage, refreshConversations, showToast]);
+
+  React.useEffect(() => {
+    const conversationId = selectedConversation?.id;
+    if (!conversationId || !me) return;
+    socket.emit("conversation:join", { conversationId });
+    loadMessages(conversationId).catch((error) =>
+      showToast(error.message, "error"),
+    );
+  }, [loadMessages, me, selectedConversation?.id, showToast]);
+
+  const openConversation = React.useCallback((conversation) => {
+    if (!conversation?.id) return;
+    setSelectedConversation(conversation);
+    setActiveView("chat");
+  }, []);
+
+  const upsertConversation = React.useCallback(
+    (conversation) => {
+      if (!conversation?.id) return;
+      setConversations((prev) => [
+        conversation,
+        ...prev.filter((c) => String(c.id) !== String(conversation.id)),
+      ]);
+      openConversation(conversation);
+    },
+    [openConversation],
+  );
 
   const sendMessage = React.useCallback(
     ({ conversationId, text }) => {
@@ -263,23 +275,18 @@ const App = () => {
         .toString(16)
         .slice(2)}`;
 
-      const optimisticMessage = {
-        id: `temp-${clientMessageId}`,
-        conversationId,
-        sender: {
-          id: me?.id,
-          username: me?.username,
-          email: me?.email,
-          avatarUrl: me?.avatarUrl,
-        },
-        type: "text",
-        text: normalizedText,
-        clientMessageId,
-        createdAt: new Date().toISOString(),
-        optimistic: true,
-      };
-
-      setMessages((prev) => mergeIncomingMessage(prev, optimisticMessage));
+      setMessages((prev) =>
+        mergeIncomingMessage(prev, {
+          id: `temp-${clientMessageId}`,
+          conversationId,
+          sender: me,
+          type: "text",
+          text: normalizedText,
+          clientMessageId,
+          createdAt: new Date().toISOString(),
+          optimistic: true,
+        }),
+      );
 
       socket.emit("message:send", {
         conversationId,
@@ -291,70 +298,51 @@ const App = () => {
     [me, mergeIncomingMessage],
   );
 
-  const logout = async () => {
-    try {
-      await apiFetch("/api/auth/logout");
-    } catch (e) {
-      reportError(e.message);
-    } finally {
-      setMe(null);
-      setSelectedConversation(null);
-      setMessages([]);
-      setOnlineUserIds(new Set());
-      setAuthNeeded(true);
-      setActiveTab("home");
+  const submitAuth = async (event) => {
+    event.preventDefault();
+    if (authMode === "signup" && !agreeTerms) {
+      setAuthNotice("Vui lòng đồng ý điều khoản trước khi tạo tài khoản.");
+      return;
     }
-  };
 
-  React.useEffect(() => {
-    const conversationId = selectedConversation?.id;
-    if (!conversationId) return;
-
-    socket.emit("conversation:join", {
-      conversationId,
-    });
-    loadMessages(conversationId).catch((e) => reportError(e.message));
-  }, [selectedConversation?.id, loadMessages, reportError]);
-
-  const submitAuth = async (e) => {
-    e.preventDefault();
+    setAuthBusy(true);
     setAuthNotice("");
     try {
-      if (authMode === "signup") {
-        const data = await apiFetch("/api/auth/signup", {
-          method: "POST",
-          body: JSON.stringify({
-            username: authForm.username,
-            email: authForm.email,
-            password: authForm.password,
-            remember: rememberMe,
-          }),
-        });
-        setMe(data.user);
-      } else {
-        const data = await apiFetch("/api/auth/login", {
-          method: "POST",
-          body: JSON.stringify({
-            email: authForm.email,
-            password: authForm.password,
-            remember: rememberMe,
-          }),
-        });
-        setMe(data.user);
-      }
+      const path = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+      const payload =
+        authMode === "signup"
+          ? {
+              username: authForm.username.trim(),
+              email: authForm.email.trim(),
+              password: authForm.password,
+              remember: rememberMe,
+            }
+          : {
+              email: authForm.email.trim(),
+              password: authForm.password,
+              remember: rememberMe,
+            };
 
-      setAuthNeeded(false);
+      const data = await apiFetch(path, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setMe(data.user);
       setAuthForm({ username: "", email: "", password: "" });
       setAuthScreen("auth");
+      setAuthNotice("");
       await refreshConversations();
-    } catch (err) {
-      setAuthNotice(err.message || "Đăng nhập thất bại");
+    } catch (error) {
+      setAuthNotice(error.message || "Đăng nhập thất bại");
+    } finally {
+      setAuthBusy(false);
     }
   };
 
   const handleGoogleLogin = React.useCallback(
     async (credential) => {
       if (!credential) return;
+      setAuthBusy(true);
       setAuthNotice("");
       try {
         const data = await apiFetch("/api/auth/google", {
@@ -362,19 +350,18 @@ const App = () => {
           body: JSON.stringify({ credential, remember: rememberMe }),
         });
         setMe(data.user);
-        setAuthNeeded(false);
-        setAuthScreen("auth");
         await refreshConversations();
-      } catch (err) {
-        setAuthNotice(err.message || "Đăng nhập Google thất bại");
+      } catch (error) {
+        setAuthNotice(error.message || "Đăng nhập Google thất bại");
+      } finally {
+        setAuthBusy(false);
       }
     },
-    [rememberMe, refreshConversations],
+    [refreshConversations, rememberMe],
   );
 
   React.useEffect(() => {
-    if (!authNeeded || authScreen !== "auth") return;
-    if (!GOOGLE_CLIENT_ID) return;
+    if (me || authScreen !== "auth" || !GOOGLE_CLIENT_ID) return;
     if (!googleButtonRef.current) return;
 
     const initGoogleButton = () => {
@@ -382,17 +369,15 @@ const App = () => {
       googleInitRef.current = true;
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
-        callback: (response) => {
-          handleGoogleLogin(response?.credential);
-        },
+        callback: (response) => handleGoogleLogin(response?.credential),
       });
       googleButtonRef.current.innerHTML = "";
       window.google.accounts.id.renderButton(googleButtonRef.current, {
         type: "standard",
         shape: "pill",
-        theme: "filled_black",
+        theme: theme === "light" ? "outline" : "filled_black",
         text: "continue_with",
-        width: 320,
+        width: 300,
         size: "large",
       });
     };
@@ -414,603 +399,422 @@ const App = () => {
     } else {
       script.addEventListener("load", initGoogleButton, { once: true });
     }
-  }, [GOOGLE_CLIENT_ID, authNeeded, authScreen, handleGoogleLogin]);
+  }, [authScreen, handleGoogleLogin, me, theme]);
 
-  const submitForgotEmail = async (e) => {
-    e.preventDefault();
+  const submitForgotEmail = async (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
     setAuthNotice("");
     try {
       const data = await apiFetch("/api/auth/forgot-password", {
         method: "POST",
-        body: JSON.stringify({ email: forgotForm.email }),
+        body: JSON.stringify({ email: forgotForm.email.trim() }),
       });
-      setForgotForm((prev) => ({
-        ...prev,
-        token: data?.resetToken || "",
-      }));
+      setForgotForm((prev) => ({ ...prev, token: data?.resetToken || "" }));
       setAuthScreen("forgot-reset");
       setAuthNotice(
         data?.resetToken
-          ? "Đã tạo mã reset (dev). Tiếp tục nhập mật khẩu mới."
-          : "Nếu email tồn tại, hệ thống đã gửi hướng dẫn đặt lại mật khẩu.",
+          ? "Mã reset dev đã được tạo. Nhập mật khẩu mới để hoàn tất."
+          : "Nếu email tồn tại, hướng dẫn đặt lại mật khẩu đã được gửi.",
       );
-    } catch (err) {
-      setAuthNotice(err.message || "Không thể xử lý yêu cầu");
+    } catch (error) {
+      setAuthNotice(error.message || "Không thể xử lý yêu cầu");
+    } finally {
+      setAuthBusy(false);
     }
   };
 
-  const submitResetPassword = async (e) => {
-    e.preventDefault();
-    setAuthNotice("");
+  const submitResetPassword = async (event) => {
+    event.preventDefault();
     if (forgotForm.password !== forgotForm.confirmPassword) {
-      setAuthNotice("Xác nhận mật khẩu không khớp");
+      setAuthNotice("Xác nhận mật khẩu không khớp.");
       return;
     }
+
+    setAuthBusy(true);
+    setAuthNotice("");
     try {
       await apiFetch("/api/auth/reset-password", {
         method: "POST",
         body: JSON.stringify({
-          token: forgotForm.token,
+          token: forgotForm.token.trim(),
           password: forgotForm.password,
         }),
       });
       setAuthNotice("Đổi mật khẩu thành công. Hãy đăng nhập lại.");
-      setAuthScreen("auth");
       setAuthMode("login");
-      setForgotForm({
-        email: "",
-        token: "",
-        password: "",
-        confirmPassword: "",
-      });
-      setAuthForm((prev) => ({ ...prev, password: "" }));
-    } catch (err) {
-      setAuthNotice(err.message || "Đặt lại mật khẩu thất bại");
+      setAuthScreen("auth");
+      setForgotForm({ email: "", token: "", password: "", confirmPassword: "" });
+    } catch (error) {
+      setAuthNotice(error.message || "Đặt lại mật khẩu thất bại");
+    } finally {
+      setAuthBusy(false);
     }
   };
 
-  if (authNeeded || !me) {
+  const logout = async () => {
+    try {
+      await apiFetch("/api/auth/logout");
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      setMe(null);
+      setSelectedConversation(null);
+      setMessages([]);
+      setConversations([]);
+      setOnlineUserIds(new Set());
+      setActiveView("home");
+    }
+  };
+
+  if (booting) {
     return (
-      <div className="min-h-[100dvh] w-full flex justify-center p-4">
-        <div className="w-full max-w-[1100px] h-[100dvh] glass-card overflow-hidden flex">
-          <div
-            className="hidden lg:flex w-[45%] p-10 flex-col justify-between"
-            style={{
-              background:
-                "linear-gradient(160deg, rgba(14,165,233,0.22) 0%, rgba(15,23,42,0.85) 55%, rgba(245,158,11,0.24) 100%)",
-            }}
-          >
-            <div>
-              <div className="text-xs uppercase tracking-[0.3em] muted">
-                Velvet Chat
+      <main className="app-frame auth-frame">
+        <div className="loading-card">
+          <div className="brand-mark">
+            <FiMessageSquare />
+          </div>
+          <div>
+            <div className="loading-title">Vibe Chat</div>
+            <div className="muted text-sm">Đang chuẩn bị không gian chat...</div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!me) {
+    return (
+      <main className="app-frame auth-frame">
+        <section className="auth-layout">
+          <div className="auth-copy">
+            <div className="brand-row">
+              <div className="brand-mark">
+                <FiMessageSquare />
               </div>
-              <div className="display-title text-4xl font-semibold mt-4">
-                Trai nghiem ket noi
-              </div>
-              <div className="text-sm muted mt-3">
-                Nhanh, an toan, day cam xuc. Gan ket hoi tho va y tuong trong
-                tung cuoc tro chuyen.
+              <div>
+                <div className="brand-name">Vibe Chat</div>
+                <div className="brand-subtitle">Chat realtime cho team nhỏ</div>
               </div>
             </div>
-            <div className="grid gap-3 text-sm">
-              {[
-                "Tin nhan thoi gian thuc",
-                "Ho so ca nhan",
-                "Tuy chinh giao dien",
-              ].map((item) => (
-                <div
-                  key={item}
-                  className="flex items-center gap-2 rounded-2xl border px-4 py-3"
-                  style={{ borderColor: "var(--app-border)" }}
-                >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: "var(--accent)" }}
-                  />
-                  <span>{item}</span>
-                </div>
-              ))}
+            <h1>Nhắn tin nhanh, tạo nhóm gọn, biết ai đang online.</h1>
+            <p>
+              Đăng nhập để trò chuyện 1-1, tạo nhóm, xem trạng thái hoạt động,
+              typing indicator và trạng thái đã xem.
+            </p>
+            <div className="auth-feature-list">
+              <span>
+                <FiCheckCircle /> Socket realtime
+              </span>
+              <span>
+                <FiCheckCircle /> Google login
+              </span>
+              <span>
+                <FiCheckCircle /> Dark/Light mode
+              </span>
             </div>
           </div>
 
-          <div className="flex-1 px-5 py-6 home-bg overflow-y-auto">
-            <div className="mb-4">
-              <div
-                className="mt-2 text-2xl font-bold"
-                style={{ color: "var(--text-other)" }}
-              >
-                {authScreen === "auth"
-                  ? "Chào mừng trở lại"
-                  : "Khôi phục tài khoản"}
-              </div>
-              <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                {authScreen === "auth"
-                  ? "Đăng nhập hoặc tạo tài khoản để tiếp tục trò chuyện."
-                  : "Làm theo các bước để đặt lại mật khẩu mới."}
-              </div>
-            </div>
-
-            <div
-              className="rounded-[30px] border p-4"
-              style={{
-                borderColor: "rgba(124,58,237,0.55)",
-                background:
-                  "linear-gradient(160deg, rgba(10,16,40,0.96) 0%, rgba(7,12,32,0.96) 58%, rgba(43,23,70,0.85) 100%)",
-                boxShadow: "0 22px 48px rgba(18, 10, 40, 0.45)",
-              }}
-            >
-              <div
-                className="rounded-[24px] border p-6"
-                style={{
-                  borderColor: "rgba(255,255,255,0.08)",
-                  background:
-                    "linear-gradient(180deg, rgba(17,24,52,0.78) 0%, rgba(11,16,34,0.78) 100%)",
-                }}
-              >
-                <div className="text-center mb-6">
-                  <div
-                    className="text-5xl font-extrabold tracking-tight"
-                    style={{
-                      background:
-                        "linear-gradient(90deg, var(--accent) 0%, var(--accent-warm) 95%)",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
+          <section className="auth-card">
+            {authScreen === "auth" ? (
+              <>
+                <div className="auth-tabs" aria-label="Chọn chế độ">
+                  <button
+                    type="button"
+                    className={authMode === "login" ? "is-active" : ""}
+                    onClick={() => {
+                      setAuthMode("login");
+                      setAuthNotice("");
                     }}
                   >
-                    Velvet
-                  </div>
-                  <div
-                    className="text-sm mt-1"
-                    style={{ color: "rgba(233,237,255,0.7)" }}
+                    Đăng nhập
+                  </button>
+                  <button
+                    type="button"
+                    className={authMode === "signup" ? "is-active" : ""}
+                    onClick={() => {
+                      setAuthMode("signup");
+                      setAuthNotice("");
+                    }}
                   >
-                    Kết nối không giới hạn
-                  </div>
+                    Đăng ký
+                  </button>
                 </div>
 
-                {authScreen === "auth" ? (
-                  <form onSubmit={submitAuth}>
-                    <div
-                      className="flex gap-2 mb-5 p-1.5 rounded-full"
-                      style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
-                    >
-                      <button
-                        type="button"
-                        className={`flex-1 py-2 rounded-full text-sm font-semibold transition ${
-                          authMode === "login" ? "btn-primary" : "btn-ghost"
-                        }`}
-                        onClick={() => setAuthMode("login")}
-                      >
-                        Đăng nhập
-                      </button>
-                      <button
-                        type="button"
-                        className={`flex-1 py-2 rounded-full text-sm font-semibold transition ${
-                          authMode === "signup" ? "btn-primary" : "btn-ghost"
-                        }`}
-                        onClick={() => setAuthMode("signup")}
-                      >
-                        Đăng ký
-                      </button>
-                    </div>
-
-                    {authMode === "signup" ? (
-                      <label
-                        className="mb-3 rounded-2xl px-4 py-3 flex items-center gap-3"
-                        style={{
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          backgroundColor: "rgba(255,255,255,0.05)",
-                        }}
-                      >
-                        <FiUser
-                          className="text-base"
-                          style={{ color: "rgba(233,237,255,0.7)" }}
-                        />
+                <form className="auth-form" onSubmit={submitAuth}>
+                  {authMode === "signup" ? (
+                    <label className="field">
+                      <span>Tên hiển thị</span>
+                      <div className="field-control">
+                        <FiUser />
                         <input
-                          className="w-full bg-transparent outline-none text-sm"
-                          style={{ color: "#f5f7ff" }}
-                          placeholder="Username"
                           value={authForm.username}
-                          onChange={(e) =>
-                            setAuthForm((p) => ({
-                              ...p,
-                              username: e.target.value,
+                          onChange={(event) =>
+                            setAuthForm((prev) => ({
+                              ...prev,
+                              username: event.target.value,
                             }))
                           }
+                          placeholder="Nguyen An"
+                          minLength={2}
+                          maxLength={50}
                           required
                         />
-                      </label>
-                    ) : null}
+                      </div>
+                    </label>
+                  ) : null}
 
-                    <label
-                      className="mb-3 rounded-2xl px-4 py-3 flex items-center gap-3"
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        backgroundColor: "rgba(255,255,255,0.05)",
-                      }}
-                    >
-                      <FiMail
-                        className="text-base"
-                        style={{ color: "rgba(233,237,255,0.7)" }}
-                      />
+                  <label className="field">
+                    <span>Email</span>
+                    <div className="field-control">
+                      <FiMail />
                       <input
                         type="email"
-                        className="w-full bg-transparent outline-none text-sm"
-                        style={{ color: "#f5f7ff" }}
-                        placeholder="Email"
                         value={authForm.email}
-                        onChange={(e) =>
-                          setAuthForm((p) => ({ ...p, email: e.target.value }))
-                        }
-                        required
-                      />
-                    </label>
-
-                    <label
-                      className="mb-3 rounded-2xl px-4 py-3 flex items-center gap-3"
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        backgroundColor: "rgba(255,255,255,0.05)",
-                      }}
-                    >
-                      <FiLock
-                        className="text-base"
-                        style={{ color: "rgba(233,237,255,0.7)" }}
-                      />
-                      <input
-                        type="password"
-                        className="w-full bg-transparent outline-none text-sm"
-                        style={{ color: "#f5f7ff" }}
-                        placeholder="Mật khẩu"
-                        value={authForm.password}
-                        onChange={(e) =>
-                          setAuthForm((p) => ({
-                            ...p,
-                            password: e.target.value,
+                        onChange={(event) =>
+                          setAuthForm((prev) => ({
+                            ...prev,
+                            email: event.target.value,
                           }))
                         }
+                        placeholder="you@example.com"
                         required
                       />
-                      <FiEyeOff
-                        className="text-base"
-                        style={{ color: "rgba(233,237,255,0.6)" }}
-                      />
-                    </label>
+                    </div>
+                  </label>
 
-                    <div className="flex items-center justify-between mb-5">
-                      <label
-                        className="flex items-center gap-2 text-xs select-none"
-                        style={{ color: "rgba(233,237,255,0.7)" }}
-                      >
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border"
-                          checked={rememberMe}
-                          onChange={(e) => setRememberMe(e.target.checked)}
-                        />
-                        Ghi nhớ đăng nhập
-                      </label>
+                  <label className="field">
+                    <span>Mật khẩu</span>
+                    <div className="field-control">
+                      <FiLock />
+                      <input
+                        type="password"
+                        value={authForm.password}
+                        onChange={(event) =>
+                          setAuthForm((prev) => ({
+                            ...prev,
+                            password: event.target.value,
+                          }))
+                        }
+                        placeholder="Ít nhất 6 ký tự"
+                        minLength={6}
+                        required
+                      />
+                    </div>
+                  </label>
+
+                  <div className="auth-options">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(event) => setRememberMe(event.target.checked)}
+                      />
+                      Ghi nhớ đăng nhập
+                    </label>
+                    {authMode === "login" ? (
                       <button
                         type="button"
-                        className="text-xs font-medium"
-                        style={{ color: "var(--accent)" }}
                         onClick={() => {
                           setAuthScreen("forgot-email");
-                          setAuthNotice("");
                           setForgotForm((prev) => ({
                             ...prev,
                             email: authForm.email || prev.email,
                           }));
+                          setAuthNotice("");
                         }}
                       >
                         Quên mật khẩu?
                       </button>
-                    </div>
+                    ) : null}
+                  </div>
 
-                    <button
-                      className="w-full rounded-full py-3.5 font-semibold text-base"
-                      style={{
-                        background:
-                          "linear-gradient(90deg, var(--accent) 0%, var(--accent-warm) 100%)",
-                        color: "#ffffff",
-                        boxShadow: "0 12px 26px rgba(14,165,233,0.35)",
-                      }}
-                      type="submit"
-                    >
-                      {authMode === "signup" ? "Tạo tài khoản" : "Đăng nhập"}
-                    </button>
-
-                    <div
-                      className="mt-6 mb-4 text-center text-xs"
-                      style={{ color: "rgba(233,237,255,0.45)" }}
-                    >
-                      HOẶC TIẾP TỤC VỚI
-                    </div>
-
-                    <div className="grid gap-3">
-                      <div
-                        className="w-full rounded-2xl p-2"
-                        style={{
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          backgroundColor: "rgba(255,255,255,0.05)",
-                        }}
-                      >
-                        {GOOGLE_CLIENT_ID ? (
-                          <div
-                            ref={googleButtonRef}
-                            className="flex justify-center"
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            className="w-full rounded-xl py-2 text-sm font-semibold"
-                            style={{ color: "rgba(233,237,255,0.9)" }}
-                            onClick={() =>
-                              setAuthNotice(
-                                "Thiếu VITE_GOOGLE_CLIENT_ID để bật đăng nhập Google",
-                              )
-                            }
-                          >
-                            Google
-                          </button>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        className="w-full rounded-2xl py-3 text-sm font-semibold"
-                        style={{
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          color: "rgba(233,237,255,0.9)",
-                          backgroundColor: "rgba(255,255,255,0.05)",
-                        }}
-                        onClick={() =>
-                          setAuthNotice("Đăng nhập Apple đang phát triển")
-                        }
-                      >
-                        Apple (Đang phát triển)
-                      </button>
-                    </div>
-                  </form>
-                ) : authScreen === "forgot-email" ? (
-                  <form onSubmit={submitForgotEmail}>
-                    <div
-                      className="text-sm mb-4"
-                      style={{ color: "rgba(233,237,255,0.75)" }}
-                    >
-                      Nhập email để tạo mã đặt lại mật khẩu.
-                    </div>
-                    <label
-                      className="mb-4 rounded-2xl px-4 py-3 flex items-center gap-3"
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        backgroundColor: "rgba(255,255,255,0.05)",
-                      }}
-                    >
-                      <FiMail
-                        className="text-base"
-                        style={{ color: "rgba(233,237,255,0.7)" }}
-                      />
+                  {authMode === "signup" ? (
+                    <label className="auth-check">
                       <input
-                        type="email"
-                        className="w-full bg-transparent outline-none text-sm"
-                        style={{ color: "#f5f7ff" }}
-                        placeholder="Email tài khoản"
-                        value={forgotForm.email}
-                        onChange={(e) =>
-                          setForgotForm((p) => ({
-                            ...p,
-                            email: e.target.value,
-                          }))
-                        }
-                        required
+                        type="checkbox"
+                        checked={agreeTerms}
+                        onChange={(event) => setAgreeTerms(event.target.checked)}
                       />
+                      Tôi đồng ý điều khoản dịch vụ và chính sách bảo mật.
                     </label>
-                    <button
-                      className="w-full rounded-full py-3.5 font-semibold text-base"
-                      style={{
-                        background:
-                          "linear-gradient(90deg, var(--accent) 0%, var(--accent-warm) 100%)",
-                        color: "#ffffff",
-                      }}
-                      type="submit"
-                    >
+                  ) : null}
+
+                  <button
+                    className="primary-action"
+                    type="submit"
+                    disabled={authBusy}
+                  >
+                    {authBusy
+                      ? "Đang xử lý..."
+                      : authMode === "signup"
+                        ? "Tạo tài khoản"
+                        : "Đăng nhập"}
+                  </button>
+                </form>
+
+                <div className="divider">
+                  <span>hoặc</span>
+                </div>
+
+                {GOOGLE_CLIENT_ID ? (
+                  <div className="google-slot" ref={googleButtonRef} />
+                ) : (
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() =>
+                      setAuthNotice(
+                        "Thiếu VITE_GOOGLE_CLIENT_ID nên Google login đang tắt.",
+                      )
+                    }
+                  >
+                    Tiếp tục với Google
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="back-link"
+                  onClick={() => {
+                    setAuthScreen("auth");
+                    setAuthNotice("");
+                  }}
+                >
+                  Quay lại đăng nhập
+                </button>
+                <h2>
+                  {authScreen === "forgot-email"
+                    ? "Khôi phục tài khoản"
+                    : "Đặt lại mật khẩu"}
+                </h2>
+                <p className="muted">
+                  {authScreen === "forgot-email"
+                    ? "Nhập email để tạo mã reset. Ở môi trường dev, mã sẽ hiện trực tiếp."
+                    : "Dán mã reset và nhập mật khẩu mới."}
+                </p>
+
+                {authScreen === "forgot-email" ? (
+                  <form className="auth-form" onSubmit={submitForgotEmail}>
+                    <label className="field">
+                      <span>Email</span>
+                      <div className="field-control">
+                        <FiMail />
+                        <input
+                          type="email"
+                          value={forgotForm.email}
+                          onChange={(event) =>
+                            setForgotForm((prev) => ({
+                              ...prev,
+                              email: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
+                    </label>
+                    <button className="primary-action" disabled={authBusy}>
                       Tiếp tục
-                    </button>
-                    <button
-                      type="button"
-                      className="w-full mt-3 rounded-full py-3 text-sm font-semibold"
-                      style={{
-                        color: "rgba(233,237,255,0.9)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                      }}
-                      onClick={() => setAuthScreen("auth")}
-                    >
-                      Quay lại đăng nhập
                     </button>
                   </form>
                 ) : (
-                  <form onSubmit={submitResetPassword}>
-                    <div
-                      className="h-1 w-full rounded-full mb-4"
-                      style={{
-                        background:
-                          "linear-gradient(90deg, rgba(14,165,233,0.95) 0%, rgba(245,158,11,0.95) 64%, rgba(255,255,255,0.15) 64%)",
-                      }}
-                    />
-                    {forgotForm.token ? (
-                      <div
-                        className="mb-3 rounded-xl px-3 py-2 text-xs"
-                        style={{
-                          color: "rgba(233,237,255,0.85)",
-                          border: "1px dashed rgba(255,255,255,0.2)",
-                        }}
-                      >
-                        Mã reset (dev): {forgotForm.token}
+                  <form className="auth-form" onSubmit={submitResetPassword}>
+                    <label className="field">
+                      <span>Mã reset</span>
+                      <div className="field-control">
+                        <FiLock />
+                        <input
+                          value={forgotForm.token}
+                          onChange={(event) =>
+                            setForgotForm((prev) => ({
+                              ...prev,
+                              token: event.target.value,
+                            }))
+                          }
+                          required
+                        />
                       </div>
-                    ) : null}
-                    <label
-                      className="mb-3 rounded-2xl px-4 py-3 flex items-center gap-3"
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        backgroundColor: "rgba(255,255,255,0.05)",
-                      }}
-                    >
-                      <FiLock
-                        className="text-base"
-                        style={{ color: "rgba(233,237,255,0.7)" }}
-                      />
-                      <input
-                        type="password"
-                        className="w-full bg-transparent outline-none text-sm"
-                        style={{ color: "#f5f7ff" }}
-                        placeholder="Mật khẩu mới"
-                        value={forgotForm.password}
-                        onChange={(e) =>
-                          setForgotForm((p) => ({
-                            ...p,
-                            password: e.target.value,
-                          }))
-                        }
-                        required
-                      />
-                      <FiEyeOff
-                        className="text-base"
-                        style={{ color: "rgba(233,237,255,0.6)" }}
-                      />
                     </label>
-                    <label
-                      className="mb-4 rounded-2xl px-4 py-3 flex items-center gap-3"
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        backgroundColor: "rgba(255,255,255,0.05)",
-                      }}
-                    >
-                      <FiRotateCcw
-                        className="text-base"
-                        style={{ color: "rgba(233,237,255,0.7)" }}
-                      />
-                      <input
-                        type="password"
-                        className="w-full bg-transparent outline-none text-sm"
-                        style={{ color: "#f5f7ff" }}
-                        placeholder="Xác nhận mật khẩu"
-                        value={forgotForm.confirmPassword}
-                        onChange={(e) =>
-                          setForgotForm((p) => ({
-                            ...p,
-                            confirmPassword: e.target.value,
-                          }))
-                        }
-                        required
-                      />
+                    <label className="field">
+                      <span>Mật khẩu mới</span>
+                      <div className="field-control">
+                        <FiLock />
+                        <input
+                          type="password"
+                          minLength={6}
+                          value={forgotForm.password}
+                          onChange={(event) =>
+                            setForgotForm((prev) => ({
+                              ...prev,
+                              password: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
                     </label>
-                    <div
-                      className="rounded-2xl px-4 py-3 mb-4"
-                      style={{ backgroundColor: "rgba(255,255,255,0.05)" }}
-                    >
-                      {[
-                        {
-                          ok: forgotForm.password.length >= 8,
-                          label: "Tối thiểu 8 ký tự",
-                        },
-                        {
-                          ok: /[A-Z]/.test(forgotForm.password),
-                          label: "Ít nhất 1 chữ hoa",
-                        },
-                        {
-                          ok: /\d/.test(forgotForm.password),
-                          label: "Ít nhất 1 chữ số",
-                        },
-                      ].map((rule) => (
-                        <div
-                          key={rule.label}
-                          className="flex items-center gap-2 text-xs mb-1 last:mb-0"
-                        >
-                          {rule.ok ? (
-                            <FiCheckCircle style={{ color: "var(--accent)" }} />
-                          ) : (
-                            <FiCircle
-                              style={{ color: "rgba(233,237,255,0.45)" }}
-                            />
-                          )}
-                          <span
-                            style={{
-                              color: rule.ok
-                                ? "#d5c8ff"
-                                : "rgba(233,237,255,0.65)",
-                            }}
-                          >
-                            {rule.label}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      className="w-full rounded-full py-3.5 font-semibold text-base"
-                      style={{
-                        background:
-                          "linear-gradient(90deg, var(--accent) 0%, var(--accent-warm) 100%)",
-                        color: "#ffffff",
-                      }}
-                      type="submit"
-                      disabled={!forgotForm.token}
-                    >
+                    <label className="field">
+                      <span>Xác nhận mật khẩu</span>
+                      <div className="field-control">
+                        <FiLock />
+                        <input
+                          type="password"
+                          minLength={6}
+                          value={forgotForm.confirmPassword}
+                          onChange={(event) =>
+                            setForgotForm((prev) => ({
+                              ...prev,
+                              confirmPassword: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
+                    </label>
+                    <button className="primary-action" disabled={authBusy}>
                       Cập nhật mật khẩu
                     </button>
                   </form>
                 )}
+              </>
+            )}
 
-                {authNotice ? (
-                  <div
-                    className="mt-4 text-xs rounded-xl px-3 py-2"
-                    style={{
-                      color: "rgba(233,237,255,0.88)",
-                      border: "1px solid rgba(255,255,255,0.13)",
-                      backgroundColor: "rgba(255,255,255,0.06)",
-                    }}
-                  >
-                    {authNotice}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+            {authNotice ? <div className="notice">{authNotice}</div> : null}
+          </section>
+        </section>
+      </main>
     );
   }
 
-  const openConversation = (conversation) => {
-    if (!conversation?.id) return;
-    setSelectedConversation(conversation);
-    setActiveTab("chat");
-  };
-
   const content =
-    activeTab === "settings" ? (
+    activeView === "settings" ? (
       <Settings
         me={me}
-        onBack={() => setActiveTab("home")}
-        onLogout={logout}
         theme={theme}
         onThemeChange={setTheme}
-        onOpenProfile={() => setActiveTab("profile")}
+        onProfileUpdated={setMe}
+        onBack={() => setActiveView("home")}
+        onLogout={logout}
+        onOpenProfile={() => setActiveView("profile")}
       />
-    ) : activeTab === "profile" ? (
+    ) : activeView === "profile" ? (
       <Profile
         me={me}
         conversationsCount={conversations.length}
-        onBack={() => setActiveTab("home")}
-        onEditProfile={() => setActiveTab("settings")}
+        onBack={() => setActiveView("home")}
+        onEditProfile={() => setActiveView("settings")}
       />
-    ) : activeTab === "chat" ? (
+    ) : activeView === "chat" ? (
       <Right
         me={me}
         conversation={selectedConversation}
         messages={messages}
         onSendMessage={sendMessage}
-        setError={reportError}
+        setError={(message) => showToast(message, "error")}
         onlineUserIds={onlineUserIds}
-        onBack={() => setActiveTab("home")}
+        onBack={() => setActiveView("home")}
       />
     ) : (
       <HomeScreen
@@ -1019,64 +823,25 @@ const App = () => {
         selectedConversation={selectedConversation}
         onSelectConversation={setSelectedConversation}
         onOpenConversation={openConversation}
+        onCreatedConversation={upsertConversation}
         onConversationsChanged={refreshConversations}
-        setError={reportError}
+        onOpenProfile={() => setActiveView("profile")}
+        onOpenSettings={() => setActiveView("settings")}
+        setError={(message) => showToast(message, "error")}
         onlineUserIds={onlineUserIds}
       />
     );
 
-  const tabs = [
-    { key: "home", label: "Trang chủ", icon: FiHome },
-    { key: "chat", label: "Chat", icon: FiMessageSquare },
-    { key: "profile", label: "Cá nhân", icon: FiUser },
-    { key: "settings", label: "Cài đặt", icon: FiSettings },
-  ];
-
   return (
-    <div className="min-h-[100dvh] w-full flex justify-center p-4">
-      <div className="w-full max-w-[1200px] h-[100dvh] glass-card overflow-hidden flex flex-col relative">
-        {toast?.text ? (
-          <div className="app-toast">
-            <div className="app-toast-title">Thong bao</div>
-            <div className="app-toast-body">{toast.text}</div>
-            {toast.conversation?.name ? (
-              <div className="app-toast-body muted truncate">
-                {toast.conversation.name}
-              </div>
-            ) : null}
+    <main className="app-frame">
+      <section className="app-shell">
+        {toast ? (
+          <div className={`app-toast ${toast.tone === "error" ? "is-error" : ""}`}>
+            {toast.text}
           </div>
         ) : null}
-        <div className="flex-1 min-h-0 panel">{content}</div>
-
-        {activeTab !== "chat" ? (
-          <div
-            className="h-16 border-t panel flex items-center justify-around"
-            style={{ borderColor: "var(--app-border)" }}
-          >
-            {tabs.map((t) => {
-              const Icon = t.icon;
-              const active = activeTab === t.key;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setActiveTab(t.key)}
-                  className="flex flex-col items-center justify-center gap-1 w-full h-full"
-                  style={{
-                    color: active ? "var(--accent)" : "var(--text-muted)",
-                  }}
-                  title={t.label}
-                >
-                  <Icon className="text-xl" />
-                  <div className="text-[11px] font-medium">{t.label}</div>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
-    </div>
+        {content}
+      </section>
+    </main>
   );
-};
-
-export default App;
+}

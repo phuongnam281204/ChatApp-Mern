@@ -1,34 +1,56 @@
 import React from "react";
 import { socket } from "../../lib/socket";
 import {
-  FiPhone,
-  FiVideo,
-  FiSearch,
-  FiSmile,
-  FiPaperclip,
   FiArrowLeft,
   FiChevronDown,
+  FiMessageSquare,
+  FiPaperclip,
+  FiPhone,
+  FiSearch,
+  FiSend,
+  FiSmile,
+  FiVideo,
 } from "react-icons/fi";
+
+function initials(name) {
+  const text = String(name || "").trim();
+  if (!text) return "?";
+  return text
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function getOtherMember(conversation, me) {
+  if (conversation?.type !== "direct") return null;
+  return (conversation.members || []).find(
+    (member) => String(member.id) !== String(me?.id),
+  );
+}
 
 function getConversationTitle(conversation, me) {
   if (!conversation) return "";
-  if (conversation.type === "group") return conversation.name || "Group";
-  const other = (conversation.members || []).find(
-    (m) => String(m.id) !== String(me?.id),
-  );
-  return other?.username || "Direct";
+  if (conversation.type === "group") return conversation.name || "Nhóm chat";
+  return getOtherMember(conversation, me)?.username || "Tin nhắn trực tiếp";
 }
 
-function initialsFromName(name) {
-  const s = String(name || "").trim();
-  if (!s) return "?";
-  const parts = s.split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] || "?";
-  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
-  return (first + last).toUpperCase();
+function getAvatarUrl(conversation, me) {
+  if (!conversation) return "";
+  if (conversation.type === "group") return conversation.avatarUrl || "";
+  return getOtherMember(conversation, me)?.avatarUrl || "";
 }
 
-const Right = ({
+function formatMessageTime(value) {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export default function Right({
   me,
   conversation,
   messages = [],
@@ -36,71 +58,49 @@ const Right = ({
   setError,
   onlineUserIds,
   onBack,
-}) => {
+}) {
   const [text, setText] = React.useState("");
   const [typingUserIds, setTypingUserIds] = React.useState(() => new Set());
   const [seenByOtherAt, setSeenByOtherAt] = React.useState(null);
-  const typingTimeoutRef = React.useRef(null);
-  const bottomRef = React.useRef(null);
-  const inputRef = React.useRef(null);
-  const messageListRef = React.useRef(null);
-  const wasNearBottomRef = React.useRef(true);
   const [showJumpToLatest, setShowJumpToLatest] = React.useState(false);
+  const typingTimeoutRef = React.useRef(null);
+  const inputRef = React.useRef(null);
+  const listRef = React.useRef(null);
+  const wasNearBottomRef = React.useRef(true);
 
   const isNearBottom = React.useCallback(() => {
-    const el = messageListRef.current;
+    const el = listRef.current;
     if (!el) return true;
-    const distance = el.scrollHeight - (el.scrollTop + el.clientHeight);
-    return distance <= 80;
+    return el.scrollHeight - (el.scrollTop + el.clientHeight) <= 96;
   }, []);
 
   const jumpToLatest = React.useCallback((behavior = "auto") => {
-    const el = messageListRef.current;
+    const el = listRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior });
     wasNearBottomRef.current = true;
     setShowJumpToLatest(false);
   }, []);
 
-  const handleMessageScroll = React.useCallback(() => {
-    const nearBottom = isNearBottom();
-    wasNearBottomRef.current = nearBottom;
-    setShowJumpToLatest(!nearBottom);
-  }, [isNearBottom]);
-
   React.useEffect(() => {
     setText("");
     setTypingUserIds(new Set());
-    if (inputRef.current) {
-      inputRef.current.style.height = "auto";
-    }
+    setSeenByOtherAt(null);
+    if (inputRef.current) inputRef.current.style.height = "auto";
     requestAnimationFrame(() => jumpToLatest("auto"));
   }, [conversation?.id, jumpToLatest]);
 
   React.useEffect(() => {
-    if (!conversation) {
+    if (!conversation || conversation.type !== "direct") {
       setSeenByOtherAt(null);
       return;
     }
-
-    if (conversation.type !== "direct") {
-      setSeenByOtherAt(null);
-      return;
-    }
-
-    const other = (conversation.members || []).find(
-      (m) => String(m.id) !== String(me?.id),
-    );
+    const other = getOtherMember(conversation, me);
     const raw = other?.id
       ? conversation.lastReadAtByUser?.[String(other.id)]
       : null;
     setSeenByOtherAt(raw ? new Date(raw) : null);
-  }, [
-    conversation?.id,
-    conversation?.type,
-    conversation?.lastReadAtByUser,
-    me?.id,
-  ]);
+  }, [conversation, me]);
 
   React.useEffect(() => {
     const onTypingUpdate = ({ conversationId, userId, isTyping }) => {
@@ -110,24 +110,20 @@ const Right = ({
 
       setTypingUserIds((prev) => {
         const next = new Set(prev);
-        const id = String(userId);
-        if (isTyping) next.add(id);
-        else next.delete(id);
+        if (isTyping) next.add(String(userId));
+        else next.delete(String(userId));
         return next;
       });
     };
 
     const onConversationSeen = ({ conversationId, userId, lastReadAt }) => {
-      if (!conversationId || !userId) return;
       if (String(conversationId) !== String(conversation?.id)) return;
-      if (String(userId) === String(me?.id)) return;
-      if (!lastReadAt) return;
+      if (String(userId) === String(me?.id) || !lastReadAt) return;
       setSeenByOtherAt(new Date(lastReadAt));
     };
 
     socket.on("typing:update", onTypingUpdate);
     socket.on("conversation:seen", onConversationSeen);
-
     return () => {
       socket.off("typing:update", onTypingUpdate);
       socket.off("conversation:seen", onConversationSeen);
@@ -137,21 +133,18 @@ const Right = ({
   React.useEffect(() => {
     if (!conversation) return;
     socket.emit("message:seen", { conversationId: conversation.id });
-
-    if (!messages.length) return;
-    const last = messages[messages.length - 1];
-    const fromOther = String(last.sender?.id) !== String(me?.id);
-    if (fromOther)
-      socket.emit("message:seen", { conversationId: conversation.id });
-  }, [conversation, messages, me?.id]);
+  }, [conversation, messages.length]);
 
   React.useEffect(() => {
-    if (wasNearBottomRef.current) {
-      jumpToLatest("auto");
-    } else {
-      setShowJumpToLatest(true);
-    }
-  }, [conversation?.id, messages.length, jumpToLatest]);
+    if (wasNearBottomRef.current) jumpToLatest("auto");
+    else setShowJumpToLatest(true);
+  }, [jumpToLatest, messages.length]);
+
+  React.useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, []);
 
   const sendTyping = React.useCallback(
     (isTyping) => {
@@ -163,266 +156,207 @@ const Right = ({
     [conversation],
   );
 
-  const handleChange = (e) => {
-    setText(e.target.value);
-    if (!conversation) return;
-
-    sendTyping(true);
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => sendTyping(false), 800);
-  };
-
-  const handleInputHeight = (e) => {
-    const el = e?.target || inputRef.current;
+  const resizeInput = () => {
+    const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   };
 
-  React.useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleChange = (event) => {
+    setText(event.target.value);
+    resizeInput();
     if (!conversation) return;
+    sendTyping(true);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => sendTyping(false), 900);
+  };
 
+  const handleSubmit = (event) => {
+    event.preventDefault();
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!conversation || !trimmed) return;
 
     try {
-      const sent = onSendMessage
-        ? onSendMessage({ conversationId: conversation.id, text: trimmed })
-        : (() => {
-            socket.emit("message:send", {
-              conversationId: conversation.id,
-              text: trimmed,
-              clientMessageId: `${Date.now()}-${Math.random()
-                .toString(16)
-                .slice(2)}`,
-            });
-            return true;
-          })();
-
+      const sent = onSendMessage?.({ conversationId: conversation.id, text: trimmed });
       if (!sent) return;
       setText("");
-      if (inputRef.current) {
-        inputRef.current.style.height = "auto";
-      }
+      if (inputRef.current) inputRef.current.style.height = "auto";
       sendTyping(false);
-    } catch (err) {
-      setError?.(err.message);
+      requestAnimationFrame(() => jumpToLatest("auto"));
+    } catch (error) {
+      setError?.(error.message);
     }
   };
 
   const title = getConversationTitle(conversation, me);
-  const avatarText = initialsFromName(title);
-
+  const avatarUrl = getAvatarUrl(conversation, me);
   const typingNames = React.useMemo(() => {
     if (!conversation || typingUserIds.size === 0) return "";
-    const members = conversation.members || [];
     const names = Array.from(typingUserIds)
-      .map((id) => members.find((m) => String(m.id) === String(id))?.username)
+      .map(
+        (id) =>
+          (conversation.members || []).find((member) => String(member.id) === id)
+            ?.username,
+      )
       .filter(Boolean);
-    if (names.length === 0) return "";
     if (names.length === 1) return `${names[0]} đang nhập...`;
-    return `${names.length} người đang nhập...`;
+    if (names.length > 1) return `${names.length} người đang nhập...`;
+    return "Đang nhập...";
   }, [conversation, typingUserIds]);
 
   const statusText = React.useMemo(() => {
-    if (!conversation) return "Chọn một đoạn chat để bắt đầu";
+    if (!conversation) return "Chọn một cuộc trò chuyện để bắt đầu";
     if (typingNames) return typingNames;
-
-    if (conversation.type === "direct") {
-      const other = (conversation.members || []).find(
-        (m) => String(m.id) !== String(me?.id),
-      );
-      if (!other) return "";
-      const online = onlineUserIds?.has?.(String(other.id));
-      return online ? "Đang hoạt động" : "Không hoạt động";
+    if (conversation.type === "group") {
+      return `${(conversation.members || []).length} thành viên`;
     }
-
-    const memberCount = (conversation.members || []).length;
-    return memberCount ? `${memberCount} thành viên` : "Nhóm";
-  }, [conversation, me?.id, onlineUserIds, typingNames]);
+    const other = getOtherMember(conversation, me);
+    return onlineUserIds?.has?.(String(other?.id))
+      ? "Đang hoạt động"
+      : "Không hoạt động";
+  }, [conversation, me, onlineUserIds, typingNames]);
 
   return (
-    <div className="relative flex-1 min-h-0 h-full flex flex-col overflow-hidden">
-      <div className="panel-header">
-        <div className="flex items-center gap-3 min-w-0">
-          {onBack ? (
-            <button
-              type="button"
-              className="rail-btn hover:bg-[var(--input-bg)]"
-              onClick={onBack}
-              title="Back"
-            >
-              <FiArrowLeft className="text-lg" />
-            </button>
-          ) : null}
-          <div className="avatar-circle" aria-hidden>
-            {conversation ? avatarText : "?"}
-          </div>
-          <div className="min-w-0">
-            <div className="font-semibold truncate">
-              {conversation ? title : "Select a conversation"}
-            </div>
-            <div className="text-xs muted truncate">
-              {conversation ? statusText : "Chọn một đoạn chat để bắt đầu"}
-            </div>
-          </div>
+    <div className="chat-view">
+      <header className="chat-header">
+        <div className="chat-title">
+          <button type="button" className="icon-button mobile-back" onClick={onBack} title="Quay lại">
+            <FiArrowLeft />
+          </button>
+          <span className="avatar">
+            {avatarUrl ? <img src={avatarUrl} alt={title} /> : initials(title)}
+          </span>
+          <span className="min-w-0">
+            <strong>{conversation ? title : "Vibe Chat"}</strong>
+            <small>{statusText}</small>
+          </span>
         </div>
-
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="rail-btn hover:bg-[var(--input-bg)]"
-            title="Call"
-          >
-            <FiPhone className="text-lg" />
+        <div className="icon-actions">
+          <button type="button" title="Gọi thoại" aria-label="Gọi thoại">
+            <FiPhone />
           </button>
-          <button
-            type="button"
-            className="rail-btn hover:bg-[var(--input-bg)]"
-            title="Video"
-          >
-            <FiVideo className="text-lg" />
+          <button type="button" title="Gọi video" aria-label="Gọi video">
+            <FiVideo />
           </button>
-          <button
-            type="button"
-            className="rail-btn hover:bg-[var(--input-bg)]"
-            title="Search"
-          >
-            <FiSearch className="text-lg" />
+          <button type="button" title="Tìm tin nhắn" aria-label="Tìm tin nhắn">
+            <FiSearch />
           </button>
         </div>
-      </div>
+      </header>
 
       <div
-        ref={messageListRef}
-        onScroll={handleMessageScroll}
-        className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-5 py-5 space-y-3 chat-shell"
+        ref={listRef}
+        className="message-list"
+        onScroll={() => {
+          const nearBottom = isNearBottom();
+          wasNearBottomRef.current = nearBottom;
+          setShowJumpToLatest(!nearBottom);
+        }}
       >
         {conversation ? (
-          messages.map((m) => {
-            const mine = String(m.sender?.id) === String(me?.id);
-            const isLastMessage = m.id === messages[messages.length - 1]?.id;
-            const showSeen =
-              mine &&
-              isLastMessage &&
-              seenByOtherAt &&
-              (!m.createdAt || seenByOtherAt >= new Date(m.createdAt));
+          messages.length ? (
+            messages.map((message) => {
+              const mine = String(message.sender?.id) === String(me?.id);
+              const last = message.id === messages[messages.length - 1]?.id;
+              const showSeen =
+                mine &&
+                last &&
+                seenByOtherAt &&
+                (!message.createdAt || seenByOtherAt >= new Date(message.createdAt));
 
-            const showSenderName = conversation?.type === "group" && !mine;
-            const senderLabel =
-              m.sender?.username || m.sender?.email || "Thành viên";
-            return (
-              <div
-                key={m.id}
-                className={`flex ${mine ? "justify-end" : "justify-start"}`}
-              >
+              return (
                 <div
-                  className={`max-w-[78%] rounded-2xl px-3.5 py-2.5 text-sm ${
-                    mine ? "bubble-me" : "bubble-other"
-                  }`}
+                  className={`message-row ${mine ? "is-mine" : "is-other"}`}
+                  key={message.id || message.clientMessageId}
                 >
-                  {showSenderName ? (
-                    <div
-                      className="text-xs mb-1 font-semibold"
-                      style={{ color: "var(--text-other)" }}
-                    >
-                      {senderLabel}
-                    </div>
+                  {!mine ? (
+                    <span className="avatar small">
+                      {message.sender?.avatarUrl ? (
+                        <img
+                          src={message.sender.avatarUrl}
+                          alt={message.sender?.username || ""}
+                        />
+                      ) : (
+                        initials(message.sender?.username || message.sender?.email)
+                      )}
+                    </span>
                   ) : null}
-                  <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
-                    {m.text}
+                  <div className={`message-bubble ${mine ? "mine" : "other"}`}>
+                    {conversation.type === "group" && !mine ? (
+                      <strong className="sender-name">
+                        {message.sender?.username || "Thành viên"}
+                      </strong>
+                    ) : null}
+                    <p>{message.text}</p>
+                    <span>
+                      {formatMessageTime(message.createdAt)}
+                      {message.optimistic ? " · đang gửi" : ""}
+                    </span>
+                    {showSeen ? <em>Đã xem</em> : null}
                   </div>
-                  <div className="text-[10px] mt-1 muted">
-                    {m.createdAt
-                      ? new Date(m.createdAt).toLocaleTimeString()
-                      : ""}
-                  </div>
-                  {showSeen ? (
-                    <div className="text-[10px] mt-1 muted text-right">
-                      Đã xem
-                    </div>
-                  ) : null}
                 </div>
-              </div>
-            );
-          })
+              );
+            })
+          ) : (
+            <div className="empty-state wide">
+              <FiMessageSquare />
+              <strong>Chưa có tin nhắn</strong>
+              <span>Gửi lời chào đầu tiên cho cuộc trò chuyện này.</span>
+            </div>
+          )
         ) : (
-          <div className="muted">No conversation selected</div>
+          <div className="empty-state wide">
+            <FiMessageSquare />
+            <strong>Chọn một cuộc trò chuyện</strong>
+            <span>Danh sách chat nằm ở màn hình chính.</span>
+          </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {conversation && showJumpToLatest ? (
         <button
           type="button"
-          onClick={() => jumpToLatest("auto")}
-          className="absolute right-4 bottom-[88px] h-10 w-10 rounded-full grid place-items-center border"
-          style={{
-            backgroundColor: "var(--surface)",
-            borderColor: "var(--app-border)",
-            color: "var(--accent)",
-            boxShadow: "0 8px 20px rgba(0,0,0,0.22)",
-          }}
-          title="Tin nhắn mới nhất"
-          aria-label="Tin nhắn mới nhất"
+          className="jump-button"
+          onClick={() => jumpToLatest("smooth")}
+          title="Tin mới nhất"
+          aria-label="Tin mới nhất"
         >
-          <FiChevronDown className="text-lg" />
+          <FiChevronDown />
         </button>
       ) : null}
 
-      <form
-        onSubmit={handleSubmit}
-        className="p-3 flex items-center gap-2 panel"
-        style={{ borderTop: "1px solid var(--app-border)" }}
-      >
-        <button
-          type="button"
-          className="rail-btn hover:bg-[var(--input-bg)]"
-          title="Emoji"
-        >
-          <FiSmile className="text-lg" />
+      <form className="message-composer" onSubmit={handleSubmit}>
+        <button type="button" title="Emoji" aria-label="Emoji">
+          <FiSmile />
         </button>
-        <button
-          type="button"
-          className="rail-btn hover:bg-[var(--input-bg)]"
-          title="Attach"
-        >
-          <FiPaperclip className="text-lg" />
+        <button type="button" title="Đính kèm" aria-label="Đính kèm">
+          <FiPaperclip />
         </button>
         <textarea
           ref={inputRef}
-          className="flex-1 input-soft rounded-2xl px-3 py-2 outline-none resize-none leading-5 max-h-[132px] overflow-y-auto"
-          placeholder={
-            conversation ? "Type a message" : "Select a conversation"
-          }
-          value={text}
-          onChange={(e) => {
-            handleChange(e);
-            handleInputHeight(e);
-          }}
           rows={1}
+          value={text}
+          onChange={handleChange}
+          placeholder={conversation ? "Nhập tin nhắn..." : "Chọn chat để nhập"}
           disabled={!conversation}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              handleSubmit(event);
+            }
+          }}
         />
         <button
-          className="btn-primary px-4 py-2 rounded-2xl disabled:opacity-50"
-          disabled={!conversation || !text.trim()}
           type="submit"
+          className="send-button"
+          disabled={!conversation || !text.trim()}
+          title="Gửi"
+          aria-label="Gửi"
         >
-          Gui
+          <FiSend />
         </button>
       </form>
     </div>
   );
-};
-
-export default Right;
+}

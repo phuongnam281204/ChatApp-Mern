@@ -1,13 +1,18 @@
 import React from "react";
+import { apiFetch } from "../../lib/api";
 import {
   FiArrowLeft,
   FiBell,
-  FiVolume2,
-  FiSmartphone,
   FiEye,
+  FiLogOut,
   FiMoon,
-  FiChevronRight,
+  FiUser,
+  FiVolume2,
 } from "react-icons/fi";
+
+function initials(name) {
+  return String(name || "?").trim().slice(0, 1).toUpperCase();
+}
 
 function Toggle({ checked, onChange, label }) {
   return (
@@ -16,221 +21,187 @@ function Toggle({ checked, onChange, label }) {
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      className={`toggle ${checked ? "is-on" : ""}`}
       onClick={() => onChange?.(!checked)}
-      className="relative inline-flex h-7 w-12 items-center rounded-full border transition-colors"
-      style={{
-        borderColor: "var(--app-border)",
-        backgroundColor: checked ? "var(--accent)" : "var(--input-bg)",
-      }}
     >
-      <span
-        className={`absolute left-1 top-1 h-5 w-5 rounded-full border transition-transform grid place-items-center ${
-          checked ? "translate-x-5" : "translate-x-0"
-        }`}
-        style={{
-          backgroundColor: checked ? "var(--surface)" : "var(--bubble-other)",
-          borderColor: "var(--app-border)",
-        }}
-      >
-        <svg
-          viewBox="0 0 24 24"
-          className={`h-3.5 w-3.5 transition-opacity pointer-events-none ${
-            checked ? "opacity-100" : "opacity-0"
-          }`}
-          style={{ color: "var(--accent)" }}
-          aria-hidden
-        >
-          <path
-            fill="currentColor"
-            d="M9.00039 16.17 4.83039 12l-1.42 1.41 5.59 5.59L20.0004 8l-1.41-1.41z"
-          />
-        </svg>
-      </span>
+      <span />
     </button>
   );
 }
 
-const Row = ({ icon: Icon, title, right }) => (
-  <div
-    className="flex items-center justify-between gap-4 px-4 py-3"
-    style={{ borderColor: "var(--app-border)" }}
-  >
-    <div className="flex items-center gap-3 min-w-0">
-      <div
-        className="h-10 w-10 rounded-2xl grid place-items-center border"
-        style={{
-          backgroundColor: "var(--input-bg)",
-          borderColor: "var(--app-border)",
-        }}
-      >
-        <Icon className="text-lg" />
-      </div>
-      <div className="min-w-0">
-        <div className="font-medium truncate">{title}</div>
-      </div>
+function SettingRow({ icon, title, subtitle, right }) {
+  return (
+    <div className="setting-row">
+      <span className="setting-icon">
+        {React.createElement(icon)}
+      </span>
+      <span className="setting-main">
+        <strong>{title}</strong>
+        {subtitle ? <small>{subtitle}</small> : null}
+      </span>
+      {right}
     </div>
-    {right}
-  </div>
-);
+  );
+}
 
-const Settings = ({
+export default function Settings({
   me,
   onBack,
   onLogout,
   theme = "dark",
   onThemeChange,
   onOpenProfile,
-}) => {
+  onProfileUpdated,
+}) {
   const [notify, setNotify] = React.useState(true);
-  const [sound, setSound] = React.useState(false);
-  const [vibrate, setVibrate] = React.useState(true);
+  const [sound, setSound] = React.useState(true);
   const [preview, setPreview] = React.useState(true);
-
-  const darkMode = theme !== "light";
-
+  const [saving, setSaving] = React.useState(false);
+  const [notice, setNotice] = React.useState("");
+  const [profileForm, setProfileForm] = React.useState({
+    username: me?.username || "",
+    avatarUrl: me?.avatarUrl || "",
+  });
   const displayName = me?.username || me?.email || "User";
-  const handle = me?.username
-    ? `@${me.username}`
-    : me?.email
-      ? `@${me.email}`
-      : "";
-  const meInitial = String(displayName).slice(0, 1).toUpperCase();
+
+  React.useEffect(() => {
+    setProfileForm({
+      username: me?.username || "",
+      avatarUrl: me?.avatarUrl || "",
+    });
+  }, [me?.avatarUrl, me?.username]);
+
+  const saveProfile = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setNotice("");
+    try {
+      const data = await apiFetch("/api/users/me", {
+        method: "PUT",
+        body: JSON.stringify(profileForm),
+      });
+      onProfileUpdated?.(data.user);
+      setNotice("Đã cập nhật hồ sơ.");
+    } catch (error) {
+      setNotice(error.message || "Không thể cập nhật hồ sơ.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className="flex-1 h-full overflow-y-auto chat-shell">
-      <div className="max-w-xl mx-auto p-6">
-        <div className="grid grid-cols-3 items-center mb-5">
-          <div>
-            <button
-              type="button"
-              className="rail-btn hover:bg-[var(--input-bg)]"
-              onClick={onBack}
-              title="Back"
-            >
-              <FiArrowLeft className="text-lg" />
+    <div className="settings-view">
+      <header className="subpage-header">
+        <button type="button" className="icon-button" onClick={onBack} title="Quay lại">
+          <FiArrowLeft />
+        </button>
+        <strong>Cài đặt</strong>
+        <span />
+      </header>
+
+      <section className="profile-summary" onClick={onOpenProfile} role="button" tabIndex={0}>
+        <span className="avatar xl">
+          {me?.avatarUrl ? <img src={me.avatarUrl} alt={displayName} /> : initials(displayName)}
+        </span>
+        <span>
+          <strong>{displayName}</strong>
+          <small>{me?.email}</small>
+        </span>
+      </section>
+
+      <section className="settings-card">
+        <form className="profile-form" onSubmit={saveProfile}>
+          <label className="field">
+            <span>Tên hiển thị</span>
+            <div className="field-control">
+              <FiUser />
+              <input
+                value={profileForm.username}
+                onChange={(event) =>
+                  setProfileForm((prev) => ({
+                    ...prev,
+                    username: event.target.value,
+                  }))
+                }
+                minLength={2}
+                maxLength={50}
+                required
+              />
+            </div>
+          </label>
+          <label className="field">
+            <span>Avatar URL</span>
+            <div className="field-control">
+              <FiUser />
+              <input
+                value={profileForm.avatarUrl}
+                onChange={(event) =>
+                  setProfileForm((prev) => ({
+                    ...prev,
+                    avatarUrl: event.target.value,
+                  }))
+                }
+                placeholder="https://..."
+              />
+            </div>
+          </label>
+          <button className="primary-action" disabled={saving}>
+            {saving ? "Đang lưu..." : "Lưu hồ sơ"}
+          </button>
+          {notice ? <div className="notice inline">{notice}</div> : null}
+        </form>
+      </section>
+
+      <section className="settings-card">
+        <SettingRow
+          icon={FiBell}
+          title="Thông báo"
+          subtitle="Nhận thông báo khi có tin mới"
+          right={<Toggle checked={notify} onChange={setNotify} label="Thông báo" />}
+        />
+        <SettingRow
+          icon={FiVolume2}
+          title="Âm thanh"
+          subtitle="Phát âm báo trong ứng dụng"
+          right={<Toggle checked={sound} onChange={setSound} label="Âm thanh" />}
+        />
+        <SettingRow
+          icon={FiEye}
+          title="Xem trước tin nhắn"
+          subtitle="Hiển thị preview trong danh sách chat"
+          right={<Toggle checked={preview} onChange={setPreview} label="Xem trước" />}
+        />
+      </section>
+
+      <section className="settings-card">
+        <SettingRow
+          icon={FiMoon}
+          title="Chế độ tối"
+          subtitle="Đổi theme cho toàn bộ ứng dụng"
+          right={
+            <Toggle
+              checked={theme !== "light"}
+              onChange={(next) => onThemeChange?.(next ? "dark" : "light")}
+              label="Chế độ tối"
+            />
+          }
+        />
+        <SettingRow
+          icon={FiUser}
+          title="Hồ sơ"
+          subtitle="Xem thông tin tài khoản"
+          right={
+            <button type="button" className="secondary-action mini" onClick={onOpenProfile}>
+              Mở
             </button>
-          </div>
-          <div className="text-center font-semibold text-lg">Cài đặt</div>
-          <div />
-        </div>
+          }
+        />
+      </section>
 
-        <button
-          type="button"
-          onClick={onOpenProfile}
-          className="w-full text-left rounded-2xl border px-4 py-4 flex items-center justify-between gap-4 glass-card"
-        >
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="avatar-circle" style={{ width: 48, height: 48 }}>
-              {me?.avatarUrl ? (
-                <img
-                  src={me.avatarUrl}
-                  alt={displayName}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                meInitial
-              )}
-            </div>
-            <div className="min-w-0">
-              <div className="font-semibold truncate">{displayName}</div>
-              <div className="text-sm muted truncate">{handle}</div>
-            </div>
-          </div>
-          <FiChevronRight className="text-xl muted" />
-        </button>
-
-        <div className="mt-5">
-          <div
-            className="text-sm font-semibold mb-3"
-            style={{ color: "var(--accent)" }}
-          >
-            Thông báo
-          </div>
-          <div className="rounded-2xl border overflow-hidden glass-card">
-            <Row
-              icon={FiBell}
-              title="Thông báo đẩy"
-              right={
-                <Toggle
-                  checked={notify}
-                  onChange={setNotify}
-                  label="Thông báo đẩy"
-                />
-              }
-            />
-            <div
-              className="h-px"
-              style={{ backgroundColor: "var(--app-border)" }}
-            />
-            <Row
-              icon={FiVolume2}
-              title="Âm thanh"
-              right={
-                <Toggle checked={sound} onChange={setSound} label="Âm thanh" />
-              }
-            />
-            <div
-              className="h-px"
-              style={{ backgroundColor: "var(--app-border)" }}
-            />
-            <Row
-              icon={FiSmartphone}
-              title="Rung"
-              right={
-                <Toggle checked={vibrate} onChange={setVibrate} label="Rung" />
-              }
-            />
-            <div
-              className="h-px"
-              style={{ backgroundColor: "var(--app-border)" }}
-            />
-            <Row
-              icon={FiEye}
-              title="Xem trước tin nhắn"
-              right={
-                <Toggle
-                  checked={preview}
-                  onChange={setPreview}
-                  label="Xem trước tin nhắn"
-                />
-              }
-            />
-          </div>
-        </div>
-
-        <div className="mt-5">
-          <div
-            className="text-sm font-semibold mb-3"
-            style={{ color: "var(--accent)" }}
-          >
-            Giao diện
-          </div>
-          <div className="rounded-2xl border overflow-hidden glass-card">
-            <Row
-              icon={FiMoon}
-              title="Chế độ tối"
-              right={
-                <Toggle
-                  checked={darkMode}
-                  onChange={(next) => onThemeChange?.(next ? "dark" : "light")}
-                  label="Chế độ tối"
-                />
-              }
-            />
-          </div>
-        </div>
-
-        <button
-          type="button"
-          className="w-full mt-6 py-3 rounded-2xl font-semibold btn-ghost"
-          style={{ borderColor: "var(--accent)", color: "var(--accent)" }}
-          onClick={onLogout}
-        >
-          Đăng xuất
-        </button>
-      </div>
+      <button type="button" className="logout-button" onClick={onLogout}>
+        <FiLogOut />
+        Đăng xuất
+      </button>
     </div>
   );
-};
-
-export default Settings;
+}
