@@ -1,17 +1,10 @@
-import { verifyAccessToken } from "../lib/auth.js";
+import { resolveSession } from "../lib/auth.js";
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   try {
-    const token = req.cookies?.access_token;
-    if (!token) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const decoded = verifyAccessToken(token);
-    req.user = { id: decoded.sub };
-
-    next();
+    req.user = await resolveSession(req.cookies?.access_token);
   } catch {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại." });
   }
+  return next();
 }

@@ -21,6 +21,9 @@ const userSchema = new mongoose.Schema(
     avatarUrl: { type: String },
     passwordResetTokenHash: { type: String, select: false },
     passwordResetExpiresAt: { type: Date, select: false },
+    // Bumped on password change/reset; tokens carrying an older value stop
+    // working, which signs out every other device. Missing = 0.
+    tokenVersion: { type: Number, default: 0, select: false },
   },
   { timestamps: true },
 );
