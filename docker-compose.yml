@@ -2,6 +2,7 @@ services:
   backend:
     build:
       context: ./backend
+    restart: unless-stopped
     environment:
       PORT: 5000
       NODE_ENV: production
@@ -30,6 +31,7 @@ services:
       dockerfile: deploy/nginx/Dockerfile
       args:
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    restart: unless-stopped
     depends_on:
       - backend
     ports:
