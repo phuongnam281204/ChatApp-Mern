@@ -30,7 +30,9 @@ export function createApp() {
   const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
   // Required when running behind a reverse proxy (e.g. Nginx) in production.
-  app.set("trust proxy", 1);
+  // TRUST_PROXY is the number of proxy hops, so req.ip (used by the rate
+  // limiter) is the real client and not the proxy in front of us.
+  app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1);
 
   app.get("/api/health", (req, res) => res.json({ ok: true }));
 

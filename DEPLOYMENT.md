@@ -57,3 +57,120 @@ When HTTPS is enabled:
 - voice messages need HTTPS: browsers only allow the microphone on `https://` (or `localhost`)
 
 Health check: `GET /api/health` answers `{ "ok": true }`.
+
+## Option B: AWS EC2 that already runs its own Nginx (Amazon Linux 2023)
+
+Use this when ports 80/443 on the server are already taken by a host Nginx
+(check with `sudo ss -tlnp | grep -E ':80 |:443 '`). Memo Chat then listens
+only on `127.0.0.1:8080` and the host Nginx forwards one domain to it.
+
+```
+browser ──https──► host Nginx :443 ──► 127.0.0.1:8080 (nginx container) ──► backend :5000
+```
+
+### 1) AWS console
+
+- Elastic IP: allocate one and associate it with the instance, otherwise the
+  public IP changes on every stop/start.
+- DNS: an `A` record `chat.<your-domain>` → the Elastic IP.
+- Security group: inbound 80 and 443 open (they already are if the host Nginx serves a site).
+- MongoDB Atlas → Network Access: add the Elastic IP.
+- Google Cloud → OAuth client → Authorized JavaScript origins: add `https://chat.<your-domain>`.
+
+### 2) Docker and the Compose plugin
+
+```
+sudo dnf install -y docker git
+sudo systemctl enable --now docker
+sudo usermod -aG docker ec2-user
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+```
+
+Log out and back in, then check `docker compose version`. If `docker compose build`
+asks for buildx, install it the same way from https://github.com/docker/buildx/releases
+(file `buildx-<version>.linux-arm64` on Graviton, `linux-amd64` on Intel) as
+`/usr/local/lib/docker/cli-plugins/docker-buildx`.
+
+On a 2 GB instance add swap so the frontend build does not run out of memory:
+
+```
+sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+### 3) App
+
+```
+git clone https://github.com/phuongnam281204/ChatApp-Mern.git && cd ChatApp-Mern
+```
+
+Create `.env` next to `docker-compose.yml` with the variables from Option A, plus:
+
+```
+CLIENT_ORIGIN=https://chat.<your-domain>
+GOOGLE_CLIENT_ID=<web client id>   # also baked into the frontend build
+APP_PORT=127.0.0.1:8080            # do not fight the host Nginx for port 80
+TRUST_PROXY=2                      # host Nginx + container nginx
+```
+
+```
+docker compose up -d --build
+curl http://127.0.0.1:8080/api/health   # {"ok":true}
+```
+
+### 4) Host Nginx site
+
+`/etc/nginx/conf.d/memo-chat.conf`:
+
+```
+server {
+  listen 80;
+  server_name chat.<your-domain>;
+
+  client_max_body_size 25m;
+
+  location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 60s;
+  }
+}
+```
+
+`X-Forwarded-For $remote_addr` (not `$proxy_add_x_forwarded_for`) stops clients
+from faking their IP to dodge the rate limiter.
+
+```
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 5) HTTPS with Let's Encrypt
+
+```
+sudo dnf install -y python3 augeas-libs
+sudo python3 -m venv /opt/certbot
+sudo /opt/certbot/bin/pip install --upgrade pip certbot certbot-nginx
+sudo ln -sf /opt/certbot/bin/certbot /usr/bin/certbot
+sudo certbot --nginx -d chat.<your-domain>
+```
+
+Certbot adds the `listen 443 ssl` block and the redirect. Renewal (Amazon Linux 2023 ships without cron):
+
+```
+sudo dnf install -y cronie && sudo systemctl enable --now crond
+echo "0 3 * * * root /opt/certbot/bin/certbot renew -q --deploy-hook 'systemctl reload nginx'" | sudo tee /etc/cron.d/certbot
+```
+
+### 6) Updating
+
+```
+cd ~/ChatApp-Mern && git pull && docker compose up -d --build
+```
