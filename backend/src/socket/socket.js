@@ -1,8 +1,12 @@
 import { Server } from "socket.io";
 import Conversation from "../models/conversation.model.js";
-import Message from "../models/message.model.js";
-import User from "../models/user.model.js";
-import { verifyAccessToken } from "../lib/auth.js";
+import { resolveSession } from "../lib/auth.js";
+import {
+  conversationRoom,
+  createAndBroadcastMessage,
+  userRoom,
+} from "../lib/realtime.js";
+import { MAX_TEXT_LENGTH } from "../controllers/message.controller.js";
 
 function parseCookies(cookieHeader) {
   const out = {};
@@ -19,14 +23,6 @@ function parseCookies(cookieHeader) {
   return out;
 }
 
-function conversationRoom(conversationId) {
-  return `conversation:${conversationId}`;
-}
-
-function userRoom(userId) {
-  return `user:${userId}`;
-}
-
 export function createSocketServer(httpServer) {
   const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
@@ -39,28 +35,29 @@ export function createSocketServer(httpServer) {
 
   const socketsByUserId = new Map(); // userId -> Set(socketId)
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
-      const cookieHeader = socket.handshake.headers?.cookie;
-      const cookies = parseCookies(cookieHeader);
-      const token = cookies.access_token;
-      if (!token) return next(new Error("Unauthorized"));
-
-      const decoded = verifyAccessToken(token);
-      socket.user = { id: decoded.sub };
-
+      const cookies = parseCookies(socket.handshake.headers?.cookie);
+      socket.user = await resolveSession(cookies.access_token);
       next();
     } catch {
       next(new Error("Unauthorized"));
     }
   });
 
+  // Online status is only shared between people who have a conversation together.
+  const contactsOf = async (userId) => {
+    const ids = await Conversation.distinct("members", { members: userId });
+    return ids.map(String).filter((id) => id !== String(userId));
+  };
+
+  const announce = async (userId, isOnline) => {
+    const contacts = await contactsOf(userId).catch(() => []);
+    for (const id of contacts) io.to(userRoom(id)).emit("presence:update", { userId, isOnline });
+  };
+
   io.on("connection", async (socket) => {
     const userId = socket.user.id;
-    const senderProfile = await User.findById(userId)
-      .select("username email avatarUrl")
-      .lean()
-      .catch(() => null);
 
     socket.join(userRoom(userId));
 
@@ -68,13 +65,12 @@ export function createSocketServer(httpServer) {
     set.add(socket.id);
     socketsByUserId.set(userId, set);
 
+    const contacts = await contactsOf(userId).catch(() => []);
     socket.emit("presence:state", {
-      userIds: Array.from(socketsByUserId.keys()),
+      userIds: contacts.filter((id) => socketsByUserId.has(id)),
     });
 
-    if (set.size === 1) {
-      io.emit("presence:update", { userId, isOnline: true });
-    }
+    if (set.size === 1) announce(userId, true);
 
     socket.on("conversation:join", async ({ conversationId }) => {
       if (!conversationId) return;
@@ -123,48 +119,31 @@ export function createSocketServer(httpServer) {
           ? String(clientMessageId)
           : undefined;
 
-        const convo = await Conversation.findById(conversationId);
-        if (!convo) return;
-        if (!convo.members.map(String).includes(String(userId))) return;
+        if (normalizedText.length > MAX_TEXT_LENGTH) {
+          socket.emit("message:error", {
+            clientMessageId: normalizedClientMessageId,
+            message: `Tin nhắn tối đa ${MAX_TEXT_LENGTH} ký tự.`,
+          });
+          return;
+        }
 
-        let message;
         try {
-          message = await Message.create({
-            conversationId,
-            senderId: userId,
+          const convo = await Conversation.findById(conversationId);
+          if (!convo) return;
+          if (!convo.members.map(String).includes(String(userId))) return;
+
+          await createAndBroadcastMessage(io, convo, userId, {
             type: "text",
             text: normalizedText,
             clientMessageId: normalizedClientMessageId,
           });
         } catch (err) {
-          if (err?.code === 11000) return;
-          throw err;
+          console.error("message:send failed", err?.message);
+          socket.emit("message:error", {
+            clientMessageId: normalizedClientMessageId,
+            message: "Gửi tin nhắn thất bại. Thử lại.",
+          });
         }
-
-        const outgoing = {
-          message: {
-            id: message._id,
-            conversationId,
-            sender: {
-              id: senderProfile?._id || userId,
-              username: senderProfile?.username,
-              email: senderProfile?.email,
-              avatarUrl: senderProfile?.avatarUrl,
-            },
-            type: message.type,
-            text: message.text,
-            clientMessageId: message.clientMessageId,
-            createdAt: message.createdAt,
-          },
-        };
-
-        for (const memberId of convo.members.map(String)) {
-          io.to(userRoom(memberId)).emit("message:new", outgoing);
-        }
-
-        convo.lastMessageAt = message.createdAt;
-        convo.lastMessagePreview = normalizedText.slice(0, 200);
-        convo.save().catch(() => {});
       },
     );
 
@@ -176,12 +155,17 @@ export function createSocketServer(httpServer) {
       if (!convo) return;
       if (!convo.members.map(String).includes(String(userId))) return;
 
-      convo.lastReadAtByUser.set(String(userId), new Date());
-      await convo.save();
+      const lastReadAt = new Date();
+      // timestamps:false so reading does not move the conversation to the top.
+      await Conversation.updateOne(
+        { _id: convo._id },
+        { $set: { [`lastReadAtByUser.${String(userId)}`]: lastReadAt } },
+        { timestamps: false },
+      );
 
-      const lastReadAt = convo.lastReadAtByUser.get(String(userId));
+      // Includes the reader: their other tabs and their own unread badge
+      // need the new read time too.
       for (const memberId of convo.members.map(String)) {
-        if (String(memberId) === String(userId)) continue;
         io.to(userRoom(memberId)).emit("conversation:seen", {
           conversationId,
           userId,
@@ -196,7 +180,7 @@ export function createSocketServer(httpServer) {
         current.delete(socket.id);
         if (current.size === 0) {
           socketsByUserId.delete(userId);
-          io.emit("presence:update", { userId, isOnline: false });
+          announce(userId, false);
         } else {
           socketsByUserId.set(userId, current);
         }
