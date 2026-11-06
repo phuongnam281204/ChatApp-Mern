@@ -1,6 +1,5 @@
 import React from "react";
-import { FiArrowLeft, FiCalendar, FiEdit2, FiMail, FiMessageSquare, FiUser } from "react-icons/fi";
-import settingsBg from "../../assets/settings-bg.png";
+import { FiArrowLeft, FiCalendar, FiEdit2, FiMail, FiUser } from "react-icons/fi";
 
 function initials(name) {
   return String(name || "?").trim().slice(0, 1).toUpperCase();
@@ -20,7 +19,7 @@ function InfoRow({ icon, label, value }) {
   );
 }
 
-export default function Profile({ me, conversationsCount = 0, onBack, onEditProfile }) {
+export default function Profile({ me, onBack, onEditProfile }) {
   const displayName = me?.username || me?.email || "User";
   const createdAt = me?.createdAt ? new Date(me.createdAt) : null;
 
@@ -37,31 +36,12 @@ export default function Profile({ me, conversationsCount = 0, onBack, onEditProf
       </header>
 
       <section className="profile-card">
-        <div
-          className="profile-cover"
-          style={{ backgroundImage: `url(${settingsBg})` }}
-        />
         <div className="profile-content">
           <span className="avatar hero">
             {me?.avatarUrl ? <img src={me.avatarUrl} alt={displayName} /> : initials(displayName)}
           </span>
           <h2>{displayName}</h2>
           <p>{me?.email}</p>
-
-          <div className="profile-stats">
-            <div>
-              <strong>{conversationsCount}</strong>
-              <span>Chat</span>
-            </div>
-            <div>
-              <strong>Realtime</strong>
-              <span>Trạng thái</span>
-            </div>
-            <div>
-              <strong>Secure</strong>
-              <span>Cookie JWT</span>
-            </div>
-          </div>
 
           <div className="info-card">
             <InfoRow icon={FiUser} label="Username" value={me?.username} />
@@ -79,12 +59,6 @@ export default function Profile({ me, conversationsCount = 0, onBack, onEditProf
                   : "Chưa có dữ liệu"
               }
             />
-          </div>
-
-          <div className="empty-state wide">
-            <FiMessageSquare />
-            <strong>Kho media đang trống</strong>
-            <span>Ảnh, video và file chia sẻ sẽ hiển thị tại đây khi app có upload.</span>
           </div>
         </div>
       </section>
