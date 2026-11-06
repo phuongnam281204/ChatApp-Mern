@@ -14,11 +14,20 @@ const messageSchema = new mongoose.Schema(
       required: true,
     },
 
-    type: { type: String, enum: ["text", "image", "file"], default: "text" },
+    // "system" = group events such as "An đã rời nhóm"; senderId is the actor.
+    type: {
+      type: String,
+      enum: ["text", "image", "file", "audio", "system"],
+      default: "text",
+    },
     text: { type: String, trim: true },
 
     fileUrl: { type: String },
     fileName: { type: String },
+    fileSize: { type: Number },
+    mimeType: { type: String },
+    // Voice messages: length in seconds.
+    duration: { type: Number },
 
     clientMessageId: { type: String },
 
